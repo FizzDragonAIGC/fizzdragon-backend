@@ -1,0 +1,579 @@
+Loaded .env file
+✅ Moodboard API 已啟用
+✅ 長篇小說處理API 已啟用
+✅ 项目API (V3架构) 已启用
+✅ 完整Pipeline API (V4) 已启用
+🎬 AI番劇 Agent Server v3 (Multi-Provider)
+   Port: 3001
+   🤖 Provider: DeepSeek
+   📊 16 Agents | 6 Skills
+[💡 概念生成器] Processing with 1 skills...
+[💡 概念生成器] Loaded 1 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (concept) model: deepseek-chat, max_tokens: 8192
+Tokens: in=336, out=329, cost=$0.000051
+[💡 概念生成器] Done!
+[🎤 訪談師] Processing with 2 skills...
+[🎤 訪談師] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (interview) model: deepseek-chat, max_tokens: 4096
+[🎤 訪談師] Processing with 2 skills...
+[🎤 訪談師] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Tokens: in=789, out=688, cost=$0.000107
+Calling DeepSeek (interview) model: deepseek-chat, max_tokens: 4096
+[🎤 訪談師] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 2
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 3
+Tokens: in=789, out=898, cost=$0.000137
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[🎤 訪談師] Done!
+Tokens: in=475, out=227, cost=$0.000038
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+Tokens: in=475, out=221, cost=$0.000038
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+Tokens: in=475, out=177, cost=$0.000031
+[📖 敘事/章節] Done!
+[💡 概念生成器] Processing with 1 skills...
+[💡 概念生成器] Loaded 1 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (concept) model: deepseek-chat, max_tokens: 8192
+[💡 概念生成器] Processing with 1 skills...
+[💡 概念生成器] Loaded 1 skill files
+[Queue] Added request, queue length: 1
+Tokens: in=336, out=287, cost=$0.000045
+Calling DeepSeek (concept) model: deepseek-chat, max_tokens: 8192
+[💡 概念生成器] Done!
+[🎤 訪談師] Processing with 2 skills...
+[🎤 訪談師] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Tokens: in=336, out=291, cost=$0.000045
+Calling DeepSeek (interview) model: deepseek-chat, max_tokens: 4096
+[💡 概念生成器] Done!
+[🎤 訪談師] Processing with 2 skills...
+[🎤 訪談師] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+[🎤 訪談師] Processing with 2 skills...
+[🎤 訪談師] Loaded 2 skill files
+[Queue] Added request, queue length: 2
+[🎤 訪談師] Processing with 2 skills...
+[🎤 訪談師] Loaded 2 skill files
+[Queue] Added request, queue length: 3
+Tokens: in=789, out=709, cost=$0.000110
+Calling DeepSeek (interview) model: deepseek-chat, max_tokens: 4096
+[🎤 訪談師] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 3
+Tokens: in=789, out=599, cost=$0.000095
+Calling DeepSeek (interview) model: deepseek-chat, max_tokens: 4096
+[🎤 訪談師] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 3
+Tokens: in=789, out=709, cost=$0.000110
+Calling DeepSeek (interview) model: deepseek-chat, max_tokens: 4096
+[🎤 訪談師] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 3
+Tokens: in=789, out=1015, cost=$0.000153
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[🎤 訪談師] Done!
+Tokens: in=475, out=198, cost=$0.000034
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+Tokens: in=475, out=179, cost=$0.000032
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Tokens: in=475, out=185, cost=$0.000033
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+Tokens: in=475, out=179, cost=$0.000032
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=224, cost=$0.000038
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=242, cost=$0.000041
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=271, cost=$0.000045
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=180, cost=$0.000032
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=163, cost=$0.000029
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=191, cost=$0.000033
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=182, cost=$0.000032
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=242, cost=$0.000041
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=180, cost=$0.000032
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=192, cost=$0.000034
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=211, cost=$0.000036
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=207, cost=$0.000036
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=185, cost=$0.000033
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=223, cost=$0.000038
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=193, cost=$0.000034
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=188, cost=$0.000033
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=216, cost=$0.000037
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=161, cost=$0.000029
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=166, cost=$0.000030
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=199, cost=$0.000035
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=199, cost=$0.000035
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=248, cost=$0.000041
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=192, cost=$0.000034
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=213, cost=$0.000036
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=216, cost=$0.000037
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=248, cost=$0.000041
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=212, cost=$0.000036
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=208, cost=$0.000036
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=199, cost=$0.000035
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=232, cost=$0.000039
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=213, cost=$0.000036
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=224, cost=$0.000038
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=210, cost=$0.000036
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=222, cost=$0.000038
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=207, cost=$0.000036
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=475, out=202, cost=$0.000035
+[📖 敘事/章節] Done!
+[💡 概念生成器] Processing with 1 skills...
+[💡 概念生成器] Loaded 1 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (concept) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+[💡 概念生成器] Processing with 1 skills...
+[💡 概念生成器] Loaded 1 skill files
+[Queue] Added request, queue length: 2
+Tokens: in=449, out=290, cost=$0.000047
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[💡 概念生成器] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 2
+Tokens: in=475, out=180, cost=$0.000032
+Calling DeepSeek (concept) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+[🎤 訪談師] Processing with 2 skills...
+[🎤 訪談師] Loaded 2 skill files
+[Queue] Added request, queue length: 2
+Tokens: in=449, out=295, cost=$0.000048
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[💡 概念生成器] Done!
+[🎤 訪談師] Processing with 2 skills...
+[🎤 訪談師] Loaded 2 skill files
+[Queue] Added request, queue length: 2
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 3
+Tokens: in=475, out=187, cost=$0.000033
+Calling DeepSeek (interview) model: deepseek-chat, max_tokens: 4096
+[📖 敘事/章節] Done!
+[🎤 訪談師] Processing with 2 skills...
+[🎤 訪談師] Loaded 2 skill files
+[Queue] Added request, queue length: 3
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 4
+[🎤 訪談師] Processing with 2 skills...
+[🎤 訪談師] Loaded 2 skill files
+[Queue] Added request, queue length: 5
+Tokens: in=902, out=918, cost=$0.000141
+Calling DeepSeek (interview) model: deepseek-chat, max_tokens: 4096
+[🎤 訪談師] Done!
+[🎤 訪談師] Processing with 2 skills...
+[🎤 訪談師] Loaded 2 skill files
+[Queue] Added request, queue length: 5
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 6
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 7
+Tokens: in=902, out=500, cost=$0.000083
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[🎤 訪談師] Done!
+Tokens: in=475, out=169, cost=$0.000030
+Calling DeepSeek (interview) model: deepseek-chat, max_tokens: 4096
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 6
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 7
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 8
+Tokens: in=902, out=1179, cost=$0.000178
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[🎤 訪談師] Done!
+Tokens: in=475, out=200, cost=$0.000035
+Calling DeepSeek (interview) model: deepseek-chat, max_tokens: 4096
+[📖 敘事/章節] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 7
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 8
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 9
+Tokens: in=902, out=1105, cost=$0.000167
+Calling DeepSeek (interview) model: deepseek-chat, max_tokens: 4096
+[🎤 訪談師] Done!
+Tokens: in=902, out=714, cost=$0.000113
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[🎤 訪談師] Done!
+Tokens: in=475, out=226, cost=$0.000038
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+Tokens: in=588, out=187, cost=$0.000034
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+Tokens: in=588, out=211, cost=$0.000038
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+Tokens: in=475, out=183, cost=$0.000032
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+Tokens: in=475, out=212, cost=$0.000036
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+Tokens: in=588, out=246, cost=$0.000043
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+Tokens: in=475, out=219, cost=$0.000037
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+Tokens: in=475, out=221, cost=$0.000038
+[📖 敘事/章節] Done!
+[💡 概念生成器] Processing with 1 skills...
+[💡 概念生成器] Loaded 1 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (concept) model: deepseek-chat, max_tokens: 8192
+Tokens: in=449, out=295, cost=$0.000048
+[💡 概念生成器] Done!
+[💡 概念生成器] Processing with 1 skills...
+[💡 概念生成器] Loaded 1 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (concept) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Tokens: in=449, out=300, cost=$0.000048
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[💡 概念生成器] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Tokens: in=588, out=177, cost=$0.000033
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+[👤 角色設計] Processing with 1 skills...
+[👤 角色設計] Loaded 1 skill files
+[Queue] Added request, queue length: 1
+Tokens: in=588, out=176, cost=$0.000033
+Calling DeepSeek (character) model: deepseek-chat, max_tokens: 8192
+[📖 敘事/章節] Done!
+[👤 角色設計] Processing with 1 skills...
+[👤 角色設計] Loaded 1 skill files
+[Queue] Added request, queue length: 1
+Tokens: in=687, out=1850, cost=$0.000269
+Calling DeepSeek (character) model: deepseek-chat, max_tokens: 8192
+[👤 角色設計] Done!
+[🎥 分鏡] Processing with 2 skills...
+[🎥 分鏡] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Tokens: in=687, out=2053, cost=$0.000297
+Calling DeepSeek (storyboard) model: deepseek-chat, max_tokens: 8192
+[👤 角色設計] Done!
+[🎥 分鏡] Processing with 2 skills...
+[🎥 分鏡] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Tokens: in=764, out=2749, cost=$0.000396
+Calling DeepSeek (storyboard) model: deepseek-chat, max_tokens: 8192
+[🎥 分鏡] Done!
+Tokens: in=764, out=2749, cost=$0.000396
+[🎥 分鏡] Done!
+[💡 概念生成器] Processing with 1 skills...
+[💡 概念生成器] Loaded 1 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (concept) model: deepseek-chat, max_tokens: 8192
+Tokens: in=449, out=296, cost=$0.000048
+[💡 概念生成器] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=588, out=220, cost=$0.000039
+[📖 敘事/章節] Done!
+[👤 角色設計] Processing with 1 skills...
+[👤 角色設計] Loaded 1 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (character) model: deepseek-chat, max_tokens: 8192
+Tokens: in=687, out=2004, cost=$0.000290
+[👤 角色設計] Done!
+[🎥 分鏡] Processing with 2 skills...
+[🎥 分鏡] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (storyboard) model: deepseek-chat, max_tokens: 8192
+Tokens: in=764, out=3011, cost=$0.000432
+[🎥 分鏡] Done!
+[💡 概念生成器] Processing with 1 skills...
+[💡 概念生成器] Loaded 1 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (concept) model: deepseek-chat, max_tokens: 8192
+Tokens: in=988, out=314, cost=$0.000058
+[💡 概念生成器] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=1127, out=319, cost=$0.000060
+[📖 敘事/章節] Done!
+[👤 角色設計] Processing with 1 skills...
+[👤 角色設計] Loaded 1 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (character) model: deepseek-chat, max_tokens: 8192
+Tokens: in=1226, out=2607, cost=$0.000382
+[👤 角色設計] Done!
+[🎥 分鏡] Processing with 2 skills...
+[🎥 分鏡] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (storyboard) model: deepseek-chat, max_tokens: 8192
+Tokens: in=1303, out=8191, cost=$0.001165
+[🎥 分鏡] Done!
+[💡 概念生成器] Processing with 1 skills...
+[💡 概念生成器] Loaded 1 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (concept) model: deepseek-chat, max_tokens: 8192
+Tokens: in=988, out=277, cost=$0.000053
+[💡 概念生成器] Done!
+[📖 敘事/章節] Processing with 2 skills...
+[📖 敘事/章節] Loaded 2 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (narrative) model: deepseek-chat, max_tokens: 8192
+Tokens: in=1127, out=428, cost=$0.000076
+[📖 敘事/章節] Done!
+Loaded .env file
+✅ Moodboard API 已啟用
+✅ 長篇小說處理API 已啟用
+✅ 项目API (V3架构) 已启用
+✅ 完整Pipeline API (V4) 已启用
+🖼️ 图像生成 API 未启用 (需要REPLICATE_API_KEY)
+🎬 AI番劇 Agent Server v3 (Multi-Provider)
+   Port: 3001
+   🤖 Provider: DeepSeek
+   📊 20 Agents | 10 Skills
+[🎥 分鏡] Processing with 9 skills...
+[🎥 分鏡] Loaded 5 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (storyboard) model: deepseek-chat, max_tokens: 8192
+DeepSeek API error: DeepSeek API error: 400 Failed to parse the request body as JSON: messages[0].content: unexpected end of hex escape at line 1 column 3170
+⚠️ 第1次失败 (storyboard): DeepSeek API error: 400 Failed to parse the request body as JSON: messages[0].content: unexpected end of hex escape at line 1 column 3170, 1秒后重试...
+Calling DeepSeek (storyboard) model: deepseek-chat, max_tokens: 8192
+DeepSeek API error: DeepSeek API error: 400 Failed to parse the request body as JSON: messages[0].content: unexpected end of hex escape at line 1 column 3170
+⚠️ 第2次失败 (storyboard): DeepSeek API error: 400 Failed to parse the request body as JSON: messages[0].content: unexpected end of hex escape at line 1 column 3170, 2秒后重试...
+Calling DeepSeek (storyboard) model: deepseek-chat, max_tokens: 8192
+DeepSeek API error: DeepSeek API error: 400 Failed to parse the request body as JSON: messages[0].content: unexpected end of hex escape at line 1 column 3170
+⚠️ 第3次失败 (storyboard): DeepSeek API error: 400 Failed to parse the request body as JSON: messages[0].content: unexpected end of hex escape at line 1 column 3170, 4秒后重试...
+Calling DeepSeek (storyboard) model: deepseek-chat, max_tokens: 8192
+DeepSeek API error: DeepSeek API error: 400 Failed to parse the request body as JSON: messages[0].content: unexpected end of hex escape at line 1 column 3170
+⚠️ 第4次失败 (storyboard): DeepSeek API error: 400 Failed to parse the request body as JSON: messages[0].content: unexpected end of hex escape at line 1 column 3170, 8秒后重试...
+Calling DeepSeek (storyboard) model: deepseek-chat, max_tokens: 8192
+DeepSeek API error: DeepSeek API error: 400 Failed to parse the request body as JSON: messages[0].content: unexpected end of hex escape at line 1 column 3170
+❌ deepseek 失败，尝试下一个Provider...
+[🎥 分鏡] Error: 所有Provider都失败了 (storyboard)
+Config updated: provider=deepseek, maxSkills=2, contentLimit=2000
+[🎥 分鏡] Processing with 9 skills...
+[🎥 分鏡] Loaded 5 skill files
+[Queue] Added request, queue length: 1
+Calling DeepSeek (storyboard) model: deepseek-chat, max_tokens: 8192
+Tokens: in=1142, out=4093, cost=$0.000589
+[🎥 分鏡] Done!

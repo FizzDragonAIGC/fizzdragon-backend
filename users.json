@@ -1,0 +1,16 @@
+{
+  "test": {
+    "username": "test",
+    "password": "360848da55293b518462a58a6c9ec7ccafef84fb33078b5dfb1a8fddcd1574dc",
+    "createdAt": "2026-02-19T16:36:32.585Z",
+    "token": "aaba8ecfb07bb081384343832920f4b6d927f9ad1e95cd443a4b902060455b8b",
+    "lastLogin": "2026-02-19T16:36:36.343Z"
+  },
+  "pax": {
+    "username": "pax",
+    "password": "291d346ca9c71655db5c4e12decc245f99677757f6f48c3e956a0ddf0d14219e",
+    "createdAt": "2026-02-19T16:37:37.391Z",
+    "token": "b04adf34afda037794677d054a53f20d57b8c32c861b3d38d7b98fbaac8d9650",
+    "lastLogin": "2026-02-19T16:41:27.593Z"
+  }
+}
