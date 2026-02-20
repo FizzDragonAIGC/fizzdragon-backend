@@ -113,23 +113,40 @@
 
 ## 八、AI Prompt格式
 
-### Image_Prompt (英文50-150詞)
+### ⚠️ 重要：Image_Prompt 和 Video_Prompt 必須是**純英文**！
+
+**禁止中英混杂**：
+- ❌ "a veiled witch facing a贵妇" 
+- ✅ "a veiled witch facing a noble lady"
+- ❌ "神秘 atmosphere"
+- ✅ "mysterious atmosphere"
+
+**翻译对照**：
+| 中文 | 英文 |
+|------|------|
+| 贵妇 | noble lady / noblewoman |
+| 占梦女巫 | dream-divination witch |
+| 神秘 | mysterious / enigmatic |
+| 西域 | Western Regions / Central Asian |
+| 草棚 | thatched hut / straw hut |
+
+### Image_Prompt (純英文50-150詞)
 ```
-Cinematic [景別] shot, [角度], [運鏡].
-[主體描述：年齡、外貌、服裝、表情、動作].
-[環境：地點、時間、氛圍].
-[燈光：類型、色溫、方向].
-[技術：鏡頭mm、光圈f值、景深].
-[風格：色調、質感、參考].
-8K, --ar 16:9 --no [負面詞]
+Cinematic [shot_type] shot, [angle], [movement].
+[Subject: age, appearance, clothing, expression, action].
+[Environment: location, time, atmosphere].
+[Lighting: type, color temperature, direction].
+[Technical: lens mm, aperture f-stop, depth of field].
+[Style: color palette, texture, reference].
+8K, --ar 16:9 --no [negative prompts]
 ```
 
-### Video_Prompt (英文30-80詞)
+### Video_Prompt (純英文30-80詞)
 ```
-[景別], [運鏡描述].
-[主體動作：誰做什麼].
-[環境變化：光線、氛圍].
-[時長]秒, [風格關鍵詞].
+[Shot type], [camera movement].
+[Subject action: who does what].
+[Environment changes: lighting, atmosphere].
+[Duration] seconds, [style keywords].
 ```
 
 ---

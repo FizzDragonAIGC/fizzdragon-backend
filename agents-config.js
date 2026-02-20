@@ -402,6 +402,17 @@ export const AGENTS = {
 - ❌ 任何字段留空
 - ❌ 只填dialogue不填其他
 - ❌ 省略Image_Prompt或Video_Prompt
+- ❌ **Image_Prompt/Video_Prompt中出現中文！必須純英文！**
+
+## 🌐 中英翻譯（Prompt必須用英文）
+| 中文 | 英文 |
+|------|------|
+| 贵妇 | noble lady |
+| 占梦女巫 | divination witch |
+| 神秘 | mysterious |
+| 西域 | Western Regions / Central Asian |
+| 草棚 | thatched hut |
+| 小猴子 | young boy (nicknamed Monkey) |
 
 ## ✅ 必須做到
 - ✅ scene: 具體場景位置
