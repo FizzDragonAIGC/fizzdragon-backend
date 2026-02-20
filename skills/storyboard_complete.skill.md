@@ -240,31 +240,47 @@ A terrified young Chinese opera boy slowly turns his head towards the door. Cand
 
 ---
 
-## 九、輸出JSON格式
+## 九、輸出JSON格式（13列專業分鏡）
+
+每個鏡頭必須包含以下13個核心字段：
 
 ```json
 {
   "shot_id": "E001_S001",
-  "episode": 1,
-  "scene_num": 1,
-  "shot_number": 1,
-  "duration": 3.5,
-  "importance": "A",
-  "shot_type": "CU",
-  "camera_angle": "Eye-level",
-  "camera_movement": "Static",
-  "character": "小豆子",
-  "emotion": "恐懼",
-  "action": "蜷縮角落，看向門外",
-  "location": "關家科班",
-  "time_of_day": "夜晚",
-  "lighting_style": "Low-key",
-  "color_palette": "灰藍冷色",
-  "emotional_intensity": 8,
-  "purpose_in_arc": "爆發",
-  "visual_subtext": "童年恐懼的根源",
-  "画面描述": "特寫鏡頭，小豆子蜷縮角落...",
-  "Image_Prompt": "Cinematic close-up shot...",
-  "Video_Prompt": "A terrified young Chinese opera boy..."
+  "scene": "咖啡廳內",
+  "time": "傍晚",
+  "lighting": "暖黃燈光，窗外夕陽",
+  "mood": "溫馨略帶憂傷",
+  "character": "小雷、阿欣",
+  "action": "小雷低頭攪動咖啡，阿欣靠近輕拍她肩膀",
+  "dialogue": "阿欣：別想太多，我們會找到真相的。",
+  "camera": "眼平",
+  "movement": "緩推",
+  "shot_type": "中景",
+  "Image_Prompt": "Cinematic medium shot of two young Hong Kong women in a warm coffee shop, golden hour light streaming through windows. One girl stirs coffee with downcast eyes, wearing casual streetwear. Her friend reaches to pat her shoulder comfortingly. Warm amber tones, shallow depth of field, 35mm anamorphic, film grain. 8K --ar 16:9",
+  "Video_Prompt": "Medium shot, camera slowly pushes in. A young woman stirs her coffee pensively. Her friend gently pats her shoulder. Warm coffee shop interior, golden hour lighting through large windows. Subtle ambient movement. 4 seconds."
 }
 ```
+
+### 字段說明
+
+| 字段 | 必填 | 說明 | 範例 |
+|------|------|------|------|
+| shot_id | ✅ | 鏡頭編號 | E01_S001 |
+| scene | ✅ | 場景位置 | 咖啡廳內/街頭/公寓 |
+| time | ✅ | 時間段 | 清晨/正午/傍晚/深夜 |
+| lighting | ✅ | 光線描述 | 逆光/暖黃/霓虹/冷白 |
+| mood | ✅ | 氛圍情緒 | 緊張/溫馨/壓抑/興奮 |
+| character | ✅ | 出場角色 | 小雷/小雷、阿欣 |
+| action | ✅ | 動作描述 | 轉身離開/握拳/淚流滿面 |
+| dialogue | ⭕ | 台詞對白 | 角色：台詞內容 |
+| camera | ✅ | 機位角度 | 眼平/俯拍/仰拍/斜角 |
+| movement | ✅ | 運鏡方式 | 固定/推/拉/搖/移/跟 |
+| shot_type | ✅ | 景別 | 特寫/近景/中景/全景/遠景 |
+| Image_Prompt | ✅ | 圖片生成詞 | 英文50-150詞 |
+| Video_Prompt | ✅ | 視頻生成詞 | 英文30-80詞 |
+
+### 注意事項
+- `dialogue` 可以為空字符串，但字段必須存在
+- `Image_Prompt` 必須是英文，包含畫面細節
+- `Video_Prompt` 必須是英文，包含動作和時長
