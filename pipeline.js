@@ -10,9 +10,46 @@
 
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// 持久化文件路径
+const PROJECTS_FILE = path.join(__dirname, 'projects.json');
 
 // 流水线状态存储
 const PIPELINES = new Map();
+
+// ========== 持久化函数 ==========
+function savePipelinesToDisk() {
+    try {
+        const data = {};
+        for (const [id, pipeline] of PIPELINES) {
+            data[id] = pipeline;
+        }
+        fs.writeFileSync(PROJECTS_FILE, JSON.stringify(data, null, 2));
+        console.log(`[Pipeline] 已保存 ${PIPELINES.size} 個項目到磁盤`);
+    } catch (e) {
+        console.error('[Pipeline] 保存失敗:', e.message);
+    }
+}
+
+function loadPipelinesFromDisk() {
+    try {
+        if (fs.existsSync(PROJECTS_FILE)) {
+            const data = JSON.parse(fs.readFileSync(PROJECTS_FILE, 'utf-8'));
+            for (const [id, pipeline] of Object.entries(data)) {
+                PIPELINES.set(id, pipeline);
+            }
+            console.log(`[Pipeline] 從磁盤載入 ${PIPELINES.size} 個項目`);
+        }
+    } catch (e) {
+        console.error('[Pipeline] 載入失敗:', e.message);
+    }
+}
+
+// 啟動時載入
+loadPipelinesFromDisk();
 
 /**
  * 智能解析分镜JSON
@@ -128,6 +165,7 @@ function createPipeline(config) {
     };
     
     PIPELINES.set(pipelineId, pipeline);
+    savePipelinesToDisk();  // 保存到磁盤
     return pipeline;
 }
 
@@ -234,6 +272,7 @@ ${pipeline.config.content?.substring(0, 3000) || '请根据标题创作'}`,
         pipeline.status = 'scripts_ready';
         pipeline.progress.scriptsGenerated = true;
         pipeline.timing.scriptsReadyAt = new Date().toISOString();
+        savePipelinesToDisk();  // 保存進度
         
         console.log(`[Project ${pipelineId}] 剧本生成完成，共${pipeline.scripts.length}集`);
         
@@ -246,6 +285,7 @@ ${pipeline.config.content?.substring(0, 3000) || '请根据标题创作'}`,
             error: err.message,
             time: new Date().toISOString()
         });
+        savePipelinesToDisk();  // 保存錯誤狀態
         throw err;
     }
 }
@@ -410,6 +450,7 @@ ${(script.scenes || []).join('\n')}
     pipeline.progress.totalShots += epShots.length;
     pipeline.progress.generatingEpisode = null;
     pipeline.status = 'scripts_ready';
+    savePipelinesToDisk();  // 保存進度
     
     console.log(`[Project ${pipelineId}] 第${episode}集分镜完成，共${epShots.length}镜头`);
     
@@ -470,6 +511,7 @@ async function generateAllStoryboards(pipelineId, callAgentFn, onProgress) {
     
     pipeline.status = 'completed';
     pipeline.timing.completedAt = new Date().toISOString();
+    savePipelinesToDisk();  // 保存完成狀態
     
     console.log(`[Project ${pipelineId}] 全部分镜生成完成！共${pipeline.progress.totalShots}镜头`);
     
