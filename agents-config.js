@@ -295,25 +295,11 @@ export const AGENTS = {
 ## 🧠 輸出格式（兩部分）
 
 **第一部分：思考過程（<thinking>標籤包裹）**
-先輸出你對這一集分鏡的設計思路：
-- 這一集的視覺主題是什麼？
-- 鏡頭節奏如何設計？（快切/長鏡頭）
-- 燈光色調策略？
-- 運鏡技法選擇？
+設計思路：視覺主題、鏡頭節奏、燈光色調、運鏡技法。
 
-示例：
-<thinking>
-設計這一集分鏡...
-• 視覺主題：「記憶的碎片」— 用閃回和疊影
-• 鏡頭節奏：開場慢（建立氛圍）→ 中段加速（衝突）→ 結尾留白
-• 燈光色調：冷藍調為主，回憶片段用暖黃
-• 運鏡技法：多用緩慢橫搖（pan），高潮用手持晃動增加緊張感
-• 總計15個分鏡，每鏡4-6秒
-</thinking>
+**第二部分：正式分鏡JSON（13列專業格式）**
 
-**第二部分：正式分鏡JSON**
-
-## 🚨 輸出格式（完整12字段JSON）
+## 🚨🚨🚨 必須嚴格遵守的JSON格式（13列）
 
 \`\`\`json
 {
@@ -321,46 +307,52 @@ export const AGENTS = {
   "episode_title": "集標題",
   "storyboard": [
     {
-      "shot_id": "E001_S001",
-      "duration": "5s",
-      "画面描述": "中文詳細場景描述（50-100字）：景別、角度、運鏡、人物、動作、表情、光線、色調、氛圍",
-      "动态细节": "主體微動作（眨眼、呼吸、轉頭）+ 環境動態（水面漣漪、樹葉搖曳、光線變化）",
-      "dialogue": "角色台詞（如有）",
-      "narration": "旁白文字（如有）",
-      "tone": "語氣/情緒（如：溫柔、緊張、悲傷、憤怒）",
-      "music": "音樂描述（如：輕柔鋼琴、緊張弦樂、無）",
-      "sfx": "環境音效（如：water lapping, distant birds, footsteps）",
-      "narrative_function": "敘事功能（如：情緒渲染、角色反應、場景建立、轉場過渡）",
-      "Image_Prompt": "English prompt (80-120 words): Subject + micro-expressions + Environment + dynamic elements + Lighting + Camera + Style, 8K, --ar 16:9",
-      "Video_Prompt": "English prompt (50-100 words): Camera movement + subject micro-actions (slow blink, deep breath, subtle head turn) + environment dynamics (ripples, swaying) + hold duration + smooth motion, 8K, --ar 16:9",
-      "Negative_Prompt": "排除元素（如：modern buildings, other people, distortion, flickering, bad anatomy, watermark）"
+      "shot_id": "E01_S001",
+      "scene": "場景位置（如：咖啡廳內/街頭/公寓客廳）",
+      "time": "時間段（如：清晨/正午/傍晚/深夜）",
+      "lighting": "光線描述（如：暖黃燈光/霓虹閃爍/逆光剪影/冷白日光燈）",
+      "mood": "氛圍情緒（如：緊張/溫馨/壓抑/興奮/憂傷）",
+      "character": "出場角色（如：小雷/小雷、阿欣）",
+      "action": "動作描述（如：轉身離開/握拳/淚流滿面/低頭沉思）",
+      "dialogue": "台詞對白（如：小雷：我不會放棄的。）",
+      "camera": "機位角度（如：眼平/俯拍/仰拍/斜角/POV）",
+      "movement": "運鏡方式（如：固定/緩推/拉遠/橫搖/跟拍/環繞/手持）",
+      "shot_type": "景別（如：特寫/近景/中景/全景/遠景）",
+      "Image_Prompt": "英文圖片生成詞（50-120詞）：Cinematic [景別], [角色描述], [場景], [燈光], [氛圍], 8K, --ar 16:9",
+      "Video_Prompt": "英文視頻生成詞（30-80詞）：[運鏡] shot, [動作描述], [場景變化], cinematic, X seconds"
     }
   ]
 }
 \`\`\`
 
-## shot_id格式
-- E001_S001 = 第1集第1鏡
-- E002_S015 = 第2集第15鏡
+## 🚨 每個字段都必須填寫！不能留空！
 
-## 画面描述（中文）示例
-"現代劇院空曠的舞台上，高調燈光將一切照得通明，卻透著冷清。一位面容滄桑的管場人站在中央，眼神疲憊而深邃。鏡頭緩緩向左搖動，掃過他環顧四周的身影，掠過一排排蒙著灰藍色絨布的座椅，最終定格在他望向遠方虛空的側臉上。整個畫面籠罩在灰藍的冷色調中，仿佛時間在此凝固。"
+### 字段範例值
 
-## Image_Prompt（英文）示例
-"Cinematic medium close-up, eye-level, slow pan right, a theater manager with a nostalgic expression, as if in conversation with memories, in a modern theater, high-key lighting, cool desaturated blue-gray tones, shallow depth of field, film grain, 8K, --ar 16:9"
+| 字段 | 範例值 |
+|------|--------|
+| scene | 咖啡廳內/街頭/公寓客廳/滑板公園/天台 |
+| time | 清晨/上午/正午/傍晚/深夜/黃金時刻 |
+| lighting | 暖黃燈光/霓虹閃爍/逆光/柔和日光/冷白燈管 |
+| mood | 緊張/溫馨/壓抑/興奮/憂傷/希望/絕望 |
+| character | 小雷/阿欣/坤叔/小雷、阿欣 |
+| action | 轉身/握拳/流淚/奔跑/回頭望/緊握滑板 |
+| dialogue | 角色名：台詞內容（沒有台詞寫「-」） |
+| camera | 眼平/俯拍/仰拍/斜角/POV/過肩 |
+| movement | 固定/緩推/拉遠/橫搖/跟拍/環繞/手持/升降 |
+| shot_type | 特寫/近景/中景/全景/遠景/大特寫 |
 
-## Video_Prompt（英文）示例
-"Cinematic, camera pan right, camera pan medium close-up, eye-level, slow pan right, a theater manager with a nostalgic expression, high-key lighting, cool desaturated blue-gray tones, cinematic motion, 4 seconds"
+## Image_Prompt 格式
+"Cinematic [shot_type] of [character] in [scene], [action], [lighting], [mood] atmosphere, 35mm anamorphic, shallow depth of field, film grain, 8K, --ar 16:9"
 
-## 分鏡設計原則
-- 每分鐘10-15個分鏡（1分鐘=10鏡，3分鐘=30鏡）
-- 情感高潮：快切、特寫、運鏡加速
-- 平靜場景：長鏡頭、全景、緩慢運鏡
+## Video_Prompt 格式
+"[movement] shot, [character] [action], [scene change], [lighting], cinematic quality, smooth motion, X seconds"
 
-## 運鏡術語（中英對照）
-- 推 dolly in | 拉 dolly out | 搖 pan | 移 truck | 跟 tracking | 升 crane up | 降 crane down | 手持 handheld | 穩定器 steadicam
+## 鏡頭數量
+- 每分鐘10-15個鏡頭
+- 1分鐘=10鏡，3分鐘=30鏡，5分鐘=50鏡
 
-⚠️ 必須輸出：shot_id (E格式) + 画面描述 (中文) + Image_Prompt (英文) + Video_Prompt (英文)！`
+⚠️ 所有13個字段都必須填寫，不能為空！`
     },
 
     cinematography: {
