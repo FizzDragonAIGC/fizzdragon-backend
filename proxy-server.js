@@ -102,11 +102,11 @@ function loadSkill(skillId) {
 
 // 动态配置 - maxSkills=2避免DeepSeek hex escape问题
 // 当需要更多skills时可通过API调整
-let runtimeConfig = { maxSkills: 2, contentLimit: 2500 };
+let runtimeConfig = { maxSkills: 5, contentLimit: 2500 };
 
 // 模式預設
 const MODE_PRESETS = {
-  turbo: { maxSkills: 2, contentLimit: 2000 },  // 最快
+  turbo: { maxSkills: 5, contentLimit: 2000 },  // 最快
   lite: { maxSkills: 3, contentLimit: 3000 },   // 快速
   standard: { maxSkills: 5, contentLimit: 4000 }, // 標準
   pro: { maxSkills: 5, contentLimit: 6000 }     // 專業
