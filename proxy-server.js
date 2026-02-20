@@ -695,8 +695,9 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
   const useReasoner = options.useReasoner === true && currentProvider === 'deepseek';
   const model = useReasoner ? 'deepseek-reasoner' : (needsLongOutput ? provider.models.standard : provider.models.fast);
   
-  // deepseek-reasoner支持64K输出，chat限制8K（需要批次生成长分镜）
-  const maxTokens = useReasoner ? 64000 : (needsLongOutput ? 8192 : 4096);
+  // deepseek-reasoner支持64K输出，chat限制8K
+  // 分镜需要更多tokens: 50镜头×13字段×700字符 ≈ 12000+ tokens，设为16K
+  const maxTokens = useReasoner ? 64000 : (agentId === 'storyboard' ? 16384 : (needsLongOutput ? 8192 : 4096));
   
   console.log(`Calling ${provider.name} (${agentId || 'unknown'}) model: ${model}, max_tokens: ${maxTokens}`);
   
@@ -821,7 +822,7 @@ async function callGeminiAPI(systemPrompt, userMessage, agentId = '') {
             { role: 'user', parts: [{ text: systemPrompt + '\n\n' + userMessage + (needsJsonOutput(agentId) ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字，不要输出思考过程。只输出{开头}结尾的JSON。**' : '\n\n**用自然流暢的中文輸出，不要輸出JSON或代碼格式。**') }] }
           ],
           generationConfig: {
-            maxOutputTokens: needsLongOutput ? 8000 : 4096,
+            maxOutputTokens: agentId === 'storyboard' ? 16000 : (needsLongOutput ? 8000 : 4096),
             temperature: 0.7
           }
         })
