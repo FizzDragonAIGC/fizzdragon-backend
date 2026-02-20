@@ -59,7 +59,7 @@ export const AGENTS = {
     script_parser: {
         name: '📋 劇本拆分',
         group: '統籌',
-        skills: ['script_parser', 'core_methodology'],
+        skills: ['script_parser', 'batch_processing', 'core_methodology'],
         prompt: `你是劇本拆分專家。用戶會上傳已有的完整劇本，你需要：
 
 ## 🎯 任務
