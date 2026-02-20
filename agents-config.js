@@ -459,9 +459,11 @@ export const AGENTS = {
       
       "appearance": "【外貌特徵】100-150字，必須包含：\n年齡、性別、身高、體型\n臉部：眼睛/眉毛/嘴巴/鼻子特徵\n髮型髮色、服裝風格、標誌性配飾\n視覺符號：代表角色的顏色/物品",
       
-      "ai_prompt": "英文Prompt（80-120詞），格式：[Name], [age] [gender], [role]. FACE: [detailed features]. HAIR: [style and color]. BUILD: [body type]. EXPRESSION: [mood]. COSTUME: [outfit details]. POSE: [posture]. --style cinematic portrait, 8K"
+      "ai_prompt": "【必填！】英文Prompt（80-120詞），格式：[Name], [age] [gender], [role]. FACE: [detailed features]. HAIR: [style and color]. BUILD: [body type]. EXPRESSION: [mood]. COSTUME: [outfit details]. POSE: [posture]. --style cinematic portrait, 8K"
     }
   ],
+
+⚠️ 每個角色都必須有 ai_prompt 字段！這是生成AI圖片的關鍵！
   "relationships": [
     {
       "from": "角色A",
@@ -478,11 +480,17 @@ export const AGENTS = {
 - 配角：3-6個（標註 role: "配角"）
 - 反派：1-2個（標註 role: "反派"）
 
-## AI Prompt公式
+## AI Prompt公式（每個角色必須有！）
 [Name], [age] [gender], [role].
 FACE: [details]. HAIR: [details]. BUILD: [details].
 EXPRESSION: [mood]. COSTUME: [outfit]. SILHOUETTE: [shape].
---style [art style], character design sheet`
+--style [art style], character design sheet
+
+## ⚠️ 重要提醒
+每個角色JSON必須包含這三個字段：
+1. bio（中文人物小傳）
+2. appearance（中文外貌描述）
+3. ai_prompt（英文AI生圖提示詞）- 這個最重要！`
     },
 
     production_design: {
