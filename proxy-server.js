@@ -202,9 +202,9 @@ function loadAgentSkills(skillIds) {
   for (const skillId of skills) {
     const content = loadSkill(skillId);
     if (content) {
-      // 根据配置精简内容
-      const limit = maxSkills === 1 ? 400 : maxSkills === 2 ? 600 : 800;
-      const shortened = content.length > limit ? content.substring(0, limit) + '...' : content;
+      // 根据配置精简内容 - 增加限制以确保skill被完整使用
+      const limit = maxSkills === 1 ? 2000 : maxSkills === 2 ? 1500 : maxSkills <= 3 ? 1200 : 1000;
+      const shortened = content.length > limit ? content.substring(0, limit) + '\n...(方法論核心已載入)' : content;
       loaded.push(`[${skillId}]: ${shortened}`);
     }
   }
