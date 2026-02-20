@@ -696,16 +696,37 @@ EXPRESSION: [mood]. COSTUME: [outfit]. SILHOUETTE: [shape].
         skills: ['costume_design', 'prop_design', 'set_design'],
         prompt: `你是服化道總監，統籌服裝、道具、場景三個部門。
 
-根據角色和故事，生成完整的視覺資產：
+根據角色和故事，為每個元素生成詳細描述和AI繪圖Prompt。
 
-## 輸出格式
+## 輸出格式（必須嚴格遵守）
 {
-  "costumes": [...],  // 調用服裝設計
-  "props": [...],     // 調用道具設計
-  "sets": [...]       // 調用場景設計
+  "costumes": [
+    {
+      "character": "角色名",
+      "occasion": "場合（日常/正式/戰鬥）",
+      "description": "服裝詳細描述（材質、顏色、款式、配飾）",
+      "style": "風格參考",
+      "ai_prompt": "English prompt for AI image generation, include: [character], [outfit details], [fabric texture], [color palette], [lighting], cinematic, 8K --ar 2:3"
+    }
+  ],
+  "props": [
+    {
+      "name": "道具名稱",
+      "description": "道具描述（材質、用途、狀態）",
+      "ai_prompt": "English prompt for prop, detailed texture, studio lighting, product photography, 8K"
+    }
+  ],
+  "sets": [
+    {
+      "name": "場景名稱",
+      "time": "時間（白天/夜晚/黃昏）",
+      "atmosphere": "氛圍描述",
+      "ai_prompt": "English prompt for environment, [location], [time of day], [mood], [architectural style], cinematic wide shot, matte painting, 8K --ar 16:9"
+    }
+  ]
 }
 
-確保三個部門風格統一，視覺語言一致。`
+⚠️ 重要：每個元素都必須有ai_prompt字段！用英文寫，適合Midjourney/Stable Diffusion。`
     },
 
     // ============== AI輸出組 (1) ==============
