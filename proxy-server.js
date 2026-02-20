@@ -691,13 +691,12 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
   }
   
   const needsLongOutput = ['storyboard', 'narrative', 'chapters', 'concept', 'screenwriter', 'character'].includes(agentId);
-  // 允许前端指定使用reasoner模式（用于逐集详写等需要高质量输出的场景）
-  const useReasoner = options.useReasoner === true && currentProvider === 'deepseek';
+  // 分镜强制使用reasoner（64K输出），或前端指定reasoner模式
+  const useReasoner = (agentId === 'storyboard' || options.useReasoner === true) && currentProvider === 'deepseek';
   const model = useReasoner ? 'deepseek-reasoner' : (needsLongOutput ? provider.models.standard : provider.models.fast);
   
-  // deepseek-reasoner支持64K输出，chat限制8K
-  // 分镜需要更多tokens: 50镜头×13字段×700字符 ≈ 12000+ tokens，设为16K
-  const maxTokens = useReasoner ? 64000 : (agentId === 'storyboard' ? 16384 : (needsLongOutput ? 8192 : 4096));
+  // deepseek-reasoner支持64K输出，足够生成100+镜头
+  const maxTokens = useReasoner ? 64000 : (needsLongOutput ? 8192 : 4096);
   
   console.log(`Calling ${provider.name} (${agentId || 'unknown'}) model: ${model}, max_tokens: ${maxTokens}`);
   
