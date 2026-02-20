@@ -271,7 +271,21 @@ try {
 }
 
 const app = express();
-app.use(cors());
+// CORS配置 - 确保所有响应都有CORS头（包括错误响应）
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false
+}));
+
+// 手动添加CORS头，确保错误响应也有
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  next();
+});
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(join(__dirname, '..')));
 
