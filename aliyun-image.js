@@ -1,10 +1,10 @@
 /**
  * 阿里云通义万相 - 文生图API
  * 
- * 使用 wan2.6-t2i 模型生成图片
+ * 使用 wanx-v1 模型生成图片（稳定版本）
  */
 
-const ALIYUN_API_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation';
+const ALIYUN_API_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis';
 
 /**
  * 生成图片
@@ -20,35 +20,31 @@ export async function generateImage(prompt, options = {}) {
     }
     
     const {
-        size = '1280*1280',  // 默认正方形
+        size = '1024*1024',  // 默认正方形
         n = 1,               // 生成数量
-        negativePrompt = '低分辨率，低画质，肢体畸形，手指畸形，画面过饱和',
-        promptExtend = true, // 智能改写
-        watermark = false    // 不要水印
+        negativePrompt = '低分辨率，低画质，肢体畸形，手指畸形',
     } = options;
     
     console.log(`[AliyunImage] 生成圖片: ${prompt.substring(0, 50)}...`);
     
+    // 使用正确的 text2image API 格式
     const response = await fetch(ALIYUN_API_URL, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
+            'Authorization': `Bearer ${apiKey}`,
+            'X-DashScope-Async': 'enable'  // 异步模式
         },
         body: JSON.stringify({
-            model: 'wan2.6-t2i',
+            model: 'wanx-v1',
             input: {
-                messages: [{
-                    role: 'user',
-                    content: [{ text: prompt }]
-                }]
+                prompt: prompt,
+                negative_prompt: negativePrompt
             },
             parameters: {
-                size,
-                n,
-                negative_prompt: negativePrompt,
-                prompt_extend: promptExtend,
-                watermark
+                size: size,
+                n: n,
+                style: '<auto>'
             }
         })
     });
@@ -56,22 +52,47 @@ export async function generateImage(prompt, options = {}) {
     if (!response.ok) {
         const error = await response.text();
         console.error('[AliyunImage] API錯誤:', error);
-        throw new Error(`阿里云API錯誤: ${response.status}`);
+        throw new Error(`阿里云API錯誤: ${response.status} - ${error}`);
     }
     
     const data = await response.json();
+    console.log('[AliyunImage] 返回:', JSON.stringify(data).substring(0, 200));
     
-    // 解析返回結果
-    if (data.output?.choices?.[0]?.message?.content) {
-        const content = data.output.choices[0].message.content;
-        const imageItem = content.find(c => c.image);
-        if (imageItem) {
-            console.log(`[AliyunImage] ✅ 生成成功`);
-            return {
-                url: imageItem.image,
-                seed: data.output?.seed
-            };
+    // 异步模式：需要轮询获取结果
+    if (data.output?.task_id) {
+        const taskId = data.output.task_id;
+        console.log(`[AliyunImage] 任务ID: ${taskId}, 开始轮询...`);
+        
+        // 轮询获取结果（最多60秒）
+        for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            
+            const statusRes = await fetch(`https://dashscope.aliyuncs.com/api/v1/tasks/${taskId}`, {
+                headers: { 'Authorization': `Bearer ${apiKey}` }
+            });
+            
+            if (!statusRes.ok) continue;
+            
+            const statusData = await statusRes.json();
+            console.log(`[AliyunImage] 任务状态: ${statusData.output?.task_status}`);
+            
+            if (statusData.output?.task_status === 'SUCCEEDED') {
+                const results = statusData.output?.results;
+                if (results?.[0]?.url) {
+                    console.log(`[AliyunImage] ✅ 生成成功`);
+                    return { url: results[0].url };
+                }
+            } else if (statusData.output?.task_status === 'FAILED') {
+                throw new Error('圖片生成失敗: ' + (statusData.output?.message || '未知錯誤'));
+            }
         }
+        
+        throw new Error('圖片生成超時');
+    }
+    
+    // 同步模式直接返回结果
+    if (data.output?.results?.[0]?.url) {
+        return { url: data.output.results[0].url };
     }
     
     throw new Error('圖片生成失敗：未返回圖片URL');
