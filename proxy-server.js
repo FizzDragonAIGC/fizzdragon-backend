@@ -193,6 +193,45 @@ function safeJSONParse(jsonStr, agentId = 'unknown') {
   }
 }
 
+// ========== 角色数据后处理 - 确保必要字段存在 ==========
+function validateAndFixCharacters(data) {
+  if (!data || !data.characters) return data;
+  
+  data.characters = data.characters.map(char => {
+    // 确保有 ai_prompt - 如果没有，根据 appearance 自动生成
+    if (!char.ai_prompt && !char.prompt) {
+      const name = char.name || 'Character';
+      const role = char.role || 'character';
+      const appearance = char.appearance || '';
+      
+      // 从外貌描述提取关键信息生成英文prompt
+      char.ai_prompt = `${name}, ${role}. ${appearance.substring(0, 200)}. --style cinematic portrait, character design, 8K`;
+      console.log(`[Validate] 自動補充 ${name} 的 ai_prompt`);
+    }
+    
+    // 统一字段名
+    if (char.prompt && !char.ai_prompt) {
+      char.ai_prompt = char.prompt;
+    }
+    
+    // 确保有 bio
+    if (!char.bio && char.psychology) {
+      const p = char.psychology;
+      char.bio = `【人物小傳】${char.name || '角色'}，${char.role || ''}。` +
+        (p.want ? `\nWant: ${p.want}` : '') +
+        (p.need ? `\nNeed: ${p.need}` : '') +
+        (p.wound ? `\nWound: ${p.wound}` : '') +
+        (p.lie ? `\nLie: ${p.lie}` : '') +
+        (p.arc ? `\n弧線: ${p.arc}` : '');
+      console.log(`[Validate] 自動補充 ${char.name} 的 bio`);
+    }
+    
+    return char;
+  });
+  
+  return data;
+}
+
 // 加载agent的所有skills内容（根据版本配置动态调整）
 function loadAgentSkills(skillIds) {
   const maxSkills = runtimeConfig.maxSkills || 1;
@@ -1324,9 +1363,26 @@ ${skillsContent}
     
     const result = await callClaude(systemPrompt, userMessage, agentId);
     
+    // 🔧 角色Agent后处理 - 确保ai_prompt等必要字段存在
+    let finalText = result.text;
+    if (agentId === 'character' && needsJsonOutput(agentId)) {
+      try {
+        // 提取JSON
+        const jsonMatch = result.text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          let parsed = safeJSONParse(jsonMatch[0], agentId);
+          parsed = validateAndFixCharacters(parsed);
+          finalText = JSON.stringify(parsed, null, 2);
+          console.log(`[${agent.name}] ✅ 角色数据已验证并补全`);
+        }
+      } catch (e) {
+        console.warn(`[${agent.name}] 角色后处理失败，返回原始结果:`, e.message);
+      }
+    }
+    
     console.log(`[${agent.name}] Done!`);
     res.json({ 
-      result: result.text, 
+      result: finalText, 
       agent: agentId, 
       skillsUsed: agent.skills, 
       tokens: result.tokens, 
