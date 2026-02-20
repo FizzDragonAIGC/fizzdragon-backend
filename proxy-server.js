@@ -460,6 +460,24 @@ app.get('/api/admin/users', (req, res) => {
   });
 });
 
+// 🔧 管理员接口：踢出用户（清除token）
+app.post('/api/admin/kick', (req, res) => {
+  const { username } = req.body;
+  if (!username) {
+    return res.status(400).json({ error: '缺少用户名' });
+  }
+  
+  const users = loadUsers();
+  if (!users[username]) {
+    return res.status(404).json({ error: '用户不存在' });
+  }
+  
+  users[username].token = null;
+  saveUsers(users);
+  console.log(`[Admin] 踢出用户: ${username}`);
+  res.json({ ok: true, message: `已踢出用户 ${username}` });
+});
+
 // 检查用户是否有正在进行的请求
 function checkUserRequest(username) {
   return userRequests.get(username) || null;
