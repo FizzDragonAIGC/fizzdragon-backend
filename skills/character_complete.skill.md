@@ -256,8 +256,33 @@ Ghost (過去事件)
     "signature": "標誌性特徵"
   },
   
-  "ai_prompt": "用於AI繪圖的角色提示詞（50-80字）"
+  "ai_prompt": "【必填！】用於AI繪圖的英文角色提示詞（50-100詞）"
 }
+```
+
+### ⚠️ ai_prompt 字段說明（必填！）
+
+這是最關鍵的輸出字段，用於AI圖像生成。**每個角色必須有ai_prompt！**
+
+**格式要求：**
+- 語言：**英文**
+- 長度：50-100詞
+- 結構：外貌 + 服裝 + 表情 + 姿態 + 風格標籤
+
+**範例：**
+```
+"ai_prompt": "A young Chinese woman in her early 20s, short messy black hair with purple highlights, sharp determined eyes, wearing oversized vintage denim jacket over a black band t-shirt, ripped jeans, holding a worn skateboard. Athletic build, several small scars on hands. Urban Hong Kong rooftop background, neon lights, cyberpunk atmosphere. Cinematic lighting, 8K, detailed face, anime-influenced realistic style --ar 2:3"
+```
+
+**必須包含的元素：**
+1. 年齡/性別/種族
+2. 髮型和髮色
+3. 面部特徵和表情
+4. 服裝細節
+5. 標誌性道具
+6. 體型特徵
+7. 背景/氛圍
+8. 風格標籤（8K, cinematic等）
 ```
 
 ---
