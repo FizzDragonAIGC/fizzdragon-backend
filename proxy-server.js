@@ -925,14 +925,27 @@ ${skillsContent}
     const result = await callClaude(systemPrompt, userMessage, agentId, options);
     
     console.log(`[${agent.name}] Done!`);
+    
+    // 🧠 解析<thinking>标签中的思考过程
+    let finalResult = result.text;
+    let thinkingContent = result.reasoning || null;
+    
+    const thinkingMatch = result.text.match(/<thinking>([\s\S]*?)<\/thinking>/);
+    if (thinkingMatch) {
+      thinkingContent = thinkingMatch[1].trim();
+      // 移除thinking标签，只保留正式结果
+      finalResult = result.text.replace(/<thinking>[\s\S]*?<\/thinking>/, '').trim();
+      console.log(`[${agent.name}] Extracted thinking: ${thinkingContent.substring(0, 100)}...`);
+    }
+    
     res.json({ 
-      result: result.text, 
+      result: finalResult, 
       agent: agentId,
       agentName: agent.name,
       skillsUsed: agent.skills,
       tokens: result.tokens,
       totalTokens: totalTokens,
-      reasoning: result.reasoning || null  // 思考过程（DeepSeek reasoner模式）
+      reasoning: thinkingContent  // 思考过程（<thinking>标签或DeepSeek reasoner）
     });
   } catch (err) {
     console.error(`[${agent.name}] Error:`, err.message);
