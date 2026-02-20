@@ -348,13 +348,8 @@ export const AGENTS = {
         name: '🎥 分鏡',
         group: '導演',
         skills: [
-            'storyboard_complete',      // 分鏡設計核心
-            'cinematography_complete',  // 攝影燈光
-            'music_complete',           // 音樂氛圍
-            'dialogue_complete',        // 對白設計
-            'voiceover_complete',       // 旁白配音
-            'character_complete',       // 角色理解
-            'narrative_complete',       // 敘事結構
+            'storyboard_master',   // 融合: storyboard + cinematography (3.3KB)
+            'creative_master',     // 融合: narrative + character + dialogue + music + voiceover (2.8KB)
             'screenplay_complete',      // 劇本格式
             'novel_processing_complete' // 小說處理
         ],  // 🔥 使用所有9個核心Skill！
