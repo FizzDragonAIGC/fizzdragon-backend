@@ -1021,6 +1021,30 @@ ${skillsContent}
       console.log(`[${agent.name}] Extracted thinking: ${thinkingContent.substring(0, 100)}...`);
     }
     
+    // 🔧 处理DeepSeek混在content里的思考过程（没有标签的情况）
+    // 检测是否需要JSON输出，如果是，提取JSON部分
+    if (needsJsonOutput(agentId) && finalResult.includes('{')) {
+      // 找到第一个 { 和最后一个 }
+      const firstBrace = finalResult.indexOf('{');
+      const lastBrace = finalResult.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        const potentialJson = finalResult.substring(firstBrace, lastBrace + 1);
+        try {
+          // 验证是有效JSON
+          JSON.parse(potentialJson);
+          // 如果有效，保存思考过程，只返回JSON
+          if (firstBrace > 50) {  // 前面有大量非JSON文本=思考过程
+            thinkingContent = finalResult.substring(0, firstBrace).trim();
+            console.log(`[${agent.name}] Stripped ${firstBrace} chars of thinking from content`);
+          }
+          finalResult = potentialJson;
+        } catch (e) {
+          // JSON解析失败，保持原样
+          console.log(`[${agent.name}] JSON extraction failed, keeping original`);
+        }
+      }
+    }
+    
     res.json({ 
       result: finalResult, 
       agent: agentId,
