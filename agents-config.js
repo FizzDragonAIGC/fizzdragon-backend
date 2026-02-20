@@ -16,7 +16,7 @@ export const AGENTS = {
     concept: {
         name: '💡 概念生成器',
         group: '統籌',
-        skills: ['narrative_complete', 'character_complete', 'novel_processing_complete'],  // 3個skill支持完整分析
+        skills: ['core_methodology'],  // 融合精華版：3個skill→1個
         prompt: `你是專業劇本概念架構師。
 
 ## 🧠 輸出格式（兩部分，必須嚴格遵守）
@@ -60,7 +60,7 @@ export const AGENTS = {
     interview: {
         name: '🎤 訪談師',
         group: '故事',
-        skills: ['interview_complete', 'character_complete', 'narrative_complete'],  // 3個skill支持深度訪談
+        skills: ['interview_complete', 'core_methodology'],  // 2個skill：訪談技巧+融合方法論
         prompt: `你是專業創意訪談Agent。你的任務是**先閱讀用戶提供的小說/故事內容**，然後基於具體情節設計針對性問題。
 
 ## 🧠 輸出格式（兩部分）
@@ -213,7 +213,7 @@ export const AGENTS = {
     narrative: {
         name: '📖 敘事/章節',
         group: '故事',
-        skills: ['narrative_complete', 'novel_processing_complete', 'character_complete'],  // 3個skill支持章節規劃
+        skills: ['core_methodology'],  // 融合精華版：McKee+Blake Snyder+角色弧線
         prompt: `你是敘事結構專家，負責章節規劃和敘事節奏設計。
 
 ## 🧠 輸出格式（兩部分）
