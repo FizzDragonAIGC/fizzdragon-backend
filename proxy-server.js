@@ -702,7 +702,7 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
   
   // 清理内容以确保JSON兼容性
   const cleanSystem = sanitizeForJson(systemPrompt);
-  const cleanUser = sanitizeForJson(userMessage + (needsJsonOutput(agentId) ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字。**' : '\n\n**用自然流暢的中文輸出，不要輸出JSON或代碼格式。**'));
+  const cleanUser = sanitizeForJson(userMessage + (needsJsonOutput(agentId) ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字，不要输出思考过程。只输出{开头}结尾的JSON。**' : '\n\n**用自然流暢的中文輸出，不要輸出JSON或代碼格式。**'));
   
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -772,7 +772,7 @@ async function callAnthropicAPI(systemPrompt, userMessage, agentId = '') {
       max_tokens: maxTokens,
       system: systemPrompt,
       messages: [
-        { role: 'user', content: userMessage + (needsJsonOutput(agentId) ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字。**' : '\n\n**用自然流暢的中文輸出，不要輸出JSON或代碼格式。**') }
+        { role: 'user', content: userMessage + (needsJsonOutput(agentId) ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字，不要输出思考过程。只输出{开头}结尾的JSON。**' : '\n\n**用自然流暢的中文輸出，不要輸出JSON或代碼格式。**') }
       ]
     });
     
@@ -818,7 +818,7 @@ async function callGeminiAPI(systemPrompt, userMessage, agentId = '') {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [
-            { role: 'user', parts: [{ text: systemPrompt + '\n\n' + userMessage + (needsJsonOutput(agentId) ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字。**' : '\n\n**用自然流暢的中文輸出，不要輸出JSON或代碼格式。**') }] }
+            { role: 'user', parts: [{ text: systemPrompt + '\n\n' + userMessage + (needsJsonOutput(agentId) ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字，不要输出思考过程。只输出{开头}结尾的JSON。**' : '\n\n**用自然流暢的中文輸出，不要輸出JSON或代碼格式。**') }] }
           ],
           generationConfig: {
             maxOutputTokens: needsLongOutput ? 8000 : 4096,
