@@ -931,7 +931,8 @@ ${skillsContent}
       agentName: agent.name,
       skillsUsed: agent.skills,
       tokens: result.tokens,
-      totalTokens: totalTokens
+      totalTokens: totalTokens,
+      reasoning: result.reasoning || null  // 思考过程（DeepSeek reasoner模式）
     });
   } catch (err) {
     console.error(`[${agent.name}] Error:`, err.message);
