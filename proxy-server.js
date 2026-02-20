@@ -444,6 +444,22 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// 🔧 管理员接口：列出所有用户（不显示密码）
+app.get('/api/admin/users', (req, res) => {
+  const users = loadUsers();
+  const userList = Object.entries(users).map(([username, data]) => ({
+    username,
+    createdAt: data.createdAt || 'unknown',
+    lastLogin: data.lastLogin || 'never',
+    isOnline: !!data.token,
+    projectCount: data.projectCount || 0
+  }));
+  res.json({ 
+    total: userList.length,
+    users: userList 
+  });
+});
+
 // 检查用户是否有正在进行的请求
 function checkUserRequest(username) {
   return userRequests.get(username) || null;
