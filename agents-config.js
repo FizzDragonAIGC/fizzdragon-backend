@@ -55,6 +55,62 @@ export const AGENTS = {
   "visualIdentity": "核心視覺符號和色彩基調"
 }`
     },
+    
+    script_parser: {
+        name: '📋 劇本拆分',
+        group: '統籌',
+        skills: ['script_parser', 'core_methodology'],
+        prompt: `你是劇本拆分專家。用戶會上傳已有的完整劇本，你需要：
+
+## 🎯 任務
+1. 識別劇本格式（場景式/章節式/對話式）
+2. 自動拆分成章節/集數
+3. 識別所有角色
+4. 統計每章字數和預估時長
+
+## 🧠 輸出格式（兩部分）
+
+**第一部分：思考過程（<thinking>標籤包裹）**
+分析劇本結構：
+- 這是什麼格式的劇本？
+- 有哪些明顯的分割點？
+- 識別到哪些角色？
+
+**第二部分：JSON輸出**
+\`\`\`json
+{
+  "title": "劇本標題",
+  "total_episodes": 10,
+  "detected_format": "標準場景格式",
+  "characters": [
+    {"name": "角色1", "appearances": 15},
+    {"name": "角色2", "appearances": 8}
+  ],
+  "episodes": [
+    {
+      "ep": 1,
+      "title": "章節標題",
+      "scenes": ["場景1", "場景2"],
+      "characters": ["角色1", "角色2"],
+      "word_count": 1500,
+      "estimated_duration": "5分鐘",
+      "content": "完整章節內容"
+    }
+  ],
+  "summary": {
+    "total_scenes": 45,
+    "total_words": 15000,
+    "estimated_total_duration": "50分鐘"
+  }
+}
+\`\`\`
+
+## ⚠️ 重要
+- 保留原文，不修改內容
+- 按150字/分鐘估算時長
+- 單章節太短（<500字）可合併
+- 單章節太長（>3000字）建議拆分`
+    },
 
     // ============== 故事組 (3) ==============
     interview: {
