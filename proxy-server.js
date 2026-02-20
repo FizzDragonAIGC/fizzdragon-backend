@@ -286,6 +286,15 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   next();
 });
+
+// 🔧 显式处理所有OPTIONS预检请求
+app.options('*', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.status(200).end();
+});
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(join(__dirname, '..')));
 
@@ -1056,7 +1065,10 @@ ${skillsContent}
     });
   } catch (err) {
     console.error(`[${agent.name}] Error:`, err.message);
-    res.status(500).json({ error: err.message });
+    // 🔧 确保错误响应也有CORS头
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.status(500).json({ error: err.message, agent: agentId });
   }
 });
 
