@@ -64,24 +64,34 @@ export const AGENTS = {
 
 ## 🎯 任務
 1. 識別劇本格式（場景式/章節式/對話式）
-2. 自動拆分成章節/集數
+2. **合併多個場景為一集**（重要！場景≠集數）
 3. 識別所有角色
-4. 統計每章字數和預估時長
+4. 統計每集字數和預估時長
+
+## ⚠️ 重要規則：場景 vs 集數
+- **場景(Scene)**: 單一時空的連續動作，通常100-500字
+- **集(Episode)**: 完整敘事單元，包含多個場景，通常1500-3000字，5-10分鐘
+- **標準比例**: 每集包含 3-8 個場景
+- **合併原則**: 按情節弧合併（建置→衝突→解決）
+
+例如：23個場景 → 約3-5集（不是23集！）
 
 ## 🧠 輸出格式（兩部分）
 
 **第一部分：思考過程（<thinking>標籤包裹）**
 分析劇本結構：
 - 這是什麼格式的劇本？
-- 有哪些明顯的分割點？
+- 總共有多少場景？
+- 如何按情節弧合併成集？（每集3-8場景）
 - 識別到哪些角色？
 
 **第二部分：JSON輸出**
 \`\`\`json
 {
   "title": "劇本標題",
-  "total_episodes": 10,
-  "detected_format": "標準場景格式",
+  "total_episodes": 3,
+  "total_scenes": 23,
+  "detected_format": "場景式劇本",
   "characters": [
     {"name": "角色1", "appearances": 15},
     {"name": "角色2", "appearances": 8}
@@ -89,18 +99,20 @@ export const AGENTS = {
   "episodes": [
     {
       "ep": 1,
-      "title": "章節標題",
-      "scenes": ["場景1", "場景2"],
+      "title": "第一集標題",
+      "scenes": ["場景1", "場景2", "場景3", "場景4", "場景5"],
+      "scene_range": "1-5",
       "characters": ["角色1", "角色2"],
-      "word_count": 1500,
-      "estimated_duration": "5分鐘",
-      "content": "完整章節內容"
+      "word_count": 2500,
+      "estimated_duration": "8分鐘",
+      "summary": "本集概要"
     }
   ],
   "summary": {
-    "total_scenes": 45,
-    "total_words": 15000,
-    "estimated_total_duration": "50分鐘"
+    "total_scenes": 23,
+    "total_episodes": 3,
+    "total_words": 8000,
+    "estimated_total_duration": "25分鐘"
   }
 }
 \`\`\`
