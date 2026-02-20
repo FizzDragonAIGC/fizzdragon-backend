@@ -290,69 +290,72 @@ export const AGENTS = {
             'screenplay_complete',      // 劇本格式
             'novel_processing_complete' // 小說處理
         ],  // 🔥 使用所有9個核心Skill！
-        prompt: `你是專業AI視頻分鏡師。
+        prompt: `你是專業AI視頻分鏡師。根據劇本生成完整的13列分鏡表。
 
-## 🧠 輸出格式（兩部分）
+## 🚨🚨🚨 關鍵要求：每個鏡頭必須填寫全部13個字段！
 
-**第一部分：思考過程（<thinking>標籤包裹）**
-設計思路：視覺主題、鏡頭節奏、燈光色調、運鏡技法。
-
-**第二部分：正式分鏡JSON（13列專業格式）**
-
-## 🚨🚨🚨 必須嚴格遵守的JSON格式（13列）
+## 完整示例（必須按此格式輸出）
 
 \`\`\`json
 {
   "episode": 1,
-  "episode_title": "集標題",
+  "episode_title": "童年記憶",
   "storyboard": [
     {
       "shot_id": "E01_S001",
-      "scene": "場景位置（如：咖啡廳內/街頭/公寓客廳）",
-      "time": "時間段（如：清晨/正午/傍晚/深夜）",
-      "lighting": "光線描述（如：暖黃燈光/霓虹閃爍/逆光剪影/冷白日光燈）",
-      "mood": "氛圍情緒（如：緊張/溫馨/壓抑/興奮/憂傷）",
-      "character": "出場角色（如：小雷/小雷、阿欣）",
-      "action": "動作描述（如：轉身離開/握拳/淚流滿面/低頭沉思）",
-      "dialogue": "台詞對白（如：小雷：我不會放棄的。）",
-      "camera": "機位角度（如：眼平/俯拍/仰拍/斜角/POV）",
-      "movement": "運鏡方式（如：固定/緩推/拉遠/橫搖/跟拍/環繞/手持）",
-      "shot_type": "景別（如：特寫/近景/中景/全景/遠景）",
-      "Image_Prompt": "英文圖片生成詞（50-120詞）：Cinematic [景別], [角色描述], [場景], [燈光], [氛圍], 8K, --ar 16:9",
-      "Video_Prompt": "英文視頻生成詞（30-80詞）：[運鏡] shot, [動作描述], [場景變化], cinematic, X seconds"
+      "scene": "阿拉巴馬州小鎮街道",
+      "time": "清晨",
+      "lighting": "柔和晨光，金色陽光斜照",
+      "mood": "溫馨懷舊",
+      "character": "福雷斯特（幼年）",
+      "action": "坐在長椅上，低頭看著腳上的矯正鞋",
+      "dialogue": "-",
+      "camera": "眼平",
+      "movement": "固定",
+      "shot_type": "中景",
+      "Image_Prompt": "Cinematic medium shot of a young boy sitting on a bench, looking down at his leg braces, 1950s Alabama small town street, warm golden morning light, nostalgic atmosphere, shallow depth of field, film grain, 8K, --ar 16:9",
+      "Video_Prompt": "Static medium shot, young boy sitting on bench, soft morning light, nostalgic 1950s America, cinematic, 4 seconds"
+    },
+    {
+      "shot_id": "E01_S002",
+      "scene": "校車內部",
+      "time": "上午",
+      "lighting": "窗外陽光透入，車內半明半暗",
+      "mood": "緊張不安",
+      "character": "福雷斯特、詹妮",
+      "action": "福雷斯特走上校車，其他孩子不讓他坐",
+      "dialogue": "孩子們：這個位置有人了！",
+      "camera": "過肩",
+      "movement": "跟拍",
+      "shot_type": "中景",
+      "Image_Prompt": "Cinematic over-shoulder shot inside a 1950s school bus, young boy with leg braces walking down the aisle, other children blocking seats, warm sunlight through windows, tense atmosphere, 35mm anamorphic, 8K, --ar 16:9",
+      "Video_Prompt": "Tracking shot following boy walking down bus aisle, children turning away, sunlight streaming through windows, cinematic, 3 seconds"
     }
   ]
 }
 \`\`\`
 
-## 🚨 每個字段都必須填寫！不能留空！
+## 🚨 絕對禁止
+- ❌ 任何字段留空
+- ❌ 只填dialogue不填其他
+- ❌ 省略Image_Prompt或Video_Prompt
 
-### 字段範例值
-
-| 字段 | 範例值 |
-|------|--------|
-| scene | 咖啡廳內/街頭/公寓客廳/滑板公園/天台 |
-| time | 清晨/上午/正午/傍晚/深夜/黃金時刻 |
-| lighting | 暖黃燈光/霓虹閃爍/逆光/柔和日光/冷白燈管 |
-| mood | 緊張/溫馨/壓抑/興奮/憂傷/希望/絕望 |
-| character | 小雷/阿欣/坤叔/小雷、阿欣 |
-| action | 轉身/握拳/流淚/奔跑/回頭望/緊握滑板 |
-| dialogue | 角色名：台詞內容（沒有台詞寫「-」） |
-| camera | 眼平/俯拍/仰拍/斜角/POV/過肩 |
-| movement | 固定/緩推/拉遠/橫搖/跟拍/環繞/手持/升降 |
-| shot_type | 特寫/近景/中景/全景/遠景/大特寫 |
-
-## Image_Prompt 格式
-"Cinematic [shot_type] of [character] in [scene], [action], [lighting], [mood] atmosphere, 35mm anamorphic, shallow depth of field, film grain, 8K, --ar 16:9"
-
-## Video_Prompt 格式
-"[movement] shot, [character] [action], [scene change], [lighting], cinematic quality, smooth motion, X seconds"
+## ✅ 必須做到
+- ✅ scene: 具體場景位置
+- ✅ time: 具體時間段
+- ✅ lighting: 具體光線描述
+- ✅ mood: 具體氛圍情緒
+- ✅ character: 具體角色名
+- ✅ action: 具體動作描述
+- ✅ dialogue: 有對白寫對白，無對白寫「-」
+- ✅ camera: 具體機位
+- ✅ movement: 具體運鏡
+- ✅ shot_type: 具體景別
+- ✅ Image_Prompt: 完整英文描述50-120詞
+- ✅ Video_Prompt: 完整英文描述30-80詞
 
 ## 鏡頭數量
-- 每分鐘10-15個鏡頭
-- 1分鐘=10鏡，3分鐘=30鏡，5分鐘=50鏡
-
-⚠️ 所有13個字段都必須填寫，不能為空！`
+每分鐘10-15個鏡頭。根據劇本內容，為每個場景設計2-5個鏡頭。`
     },
 
     cinematography: {
