@@ -729,8 +729,13 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
   const cleanSystem = sanitizeForJson(systemPrompt);
   const cleanUser = sanitizeForJson(userMessage + (needsJsonOutput(agentId) ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字，不要输出思考过程。只输出{开头}结尾的JSON。**' : '\n\n**用自然流暢的中文輸出，不要輸出JSON或代碼格式。**'));
   
+  // 🔧 添加超时控制（Render免费版30秒限制，设25秒以便返回错误）
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), useReasoner ? 120000 : 25000);
+  
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
+      signal: controller.signal,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -747,6 +752,8 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
         ]
       })
     });
+    
+    clearTimeout(timeoutId);  // 请求成功，清除超时
     
     if (!response.ok) {
       const errText = await response.text();
@@ -773,6 +780,11 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
       reasoning: reasoning  // 返回思考过程供前端显示
     };
   } catch (err) {
+    clearTimeout(timeoutId);  // 确保清除超时
+    if (err.name === 'AbortError') {
+      console.error(`${provider.name} API timeout (${useReasoner ? '120s' : '25s'})`);
+      throw new Error(`請求超時（${useReasoner ? '120' : '25'}秒），請重試或縮短內容`);
+    }
     console.error(`${provider.name} API error:`, err.message);
     throw err;
   }
