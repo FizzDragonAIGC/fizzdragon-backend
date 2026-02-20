@@ -2286,6 +2286,76 @@ app.get('/api/generate-image/status', (req, res) => {
 
 console.log(`🖼️ 图像生成 API ${REPLICATE_API_KEY ? '已启用' : '未启用 (需要REPLICATE_API_KEY)'}`);
 
+// ========== 用户项目持久化存储 ==========
+const USER_PROJECTS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'user_projects');
+
+// 确保目录存在
+try {
+  if (!existsSync(USER_PROJECTS_DIR)) {
+    const { mkdirSync } = await import('fs');
+    mkdirSync(USER_PROJECTS_DIR, { recursive: true });
+  }
+} catch (e) {
+  console.warn('无法创建用户项目目录:', e.message);
+}
+
+// 获取用户项目
+app.get('/api/user-projects/:userId', (req, res) => {
+  const { userId } = req.params;
+  const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
+  
+  try {
+    if (existsSync(filePath)) {
+      const data = readFileSync(filePath, 'utf-8');
+      res.json(JSON.parse(data));
+    } else {
+      res.json({});
+    }
+  } catch (e) {
+    console.error(`[Projects] 读取失败 ${userId}:`, e.message);
+    res.json({});
+  }
+});
+
+// 保存用户项目
+app.post('/api/user-projects/:userId', (req, res) => {
+  const { userId } = req.params;
+  const projects = req.body;
+  const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
+  
+  try {
+    writeFileSync(filePath, JSON.stringify(projects, null, 2));
+    console.log(`[Projects] 保存成功 ${userId}: ${Object.keys(projects).length} 个项目`);
+    res.json({ status: 'ok', count: Object.keys(projects).length });
+  } catch (e) {
+    console.error(`[Projects] 保存失败 ${userId}:`, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 同步单个项目（增量更新）
+app.put('/api/user-projects/:userId/:projectId', (req, res) => {
+  const { userId, projectId } = req.params;
+  const projectData = req.body;
+  const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
+  
+  try {
+    let projects = {};
+    if (existsSync(filePath)) {
+      projects = JSON.parse(readFileSync(filePath, 'utf-8'));
+    }
+    projects[projectId] = projectData;
+    writeFileSync(filePath, JSON.stringify(projects, null, 2));
+    console.log(`[Projects] 更新 ${userId}/${projectId}`);
+    res.json({ status: 'ok' });
+  } catch (e) {
+    console.error(`[Projects] 更新失败:`, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+console.log(`💾 用户项目存储 API 已启用`);
+
 app.listen(PORT, () => {
   const provider = PROVIDERS[currentProvider];
   console.log(`🎬 AI番劇 Agent Server v3 (Multi-Provider)`);
