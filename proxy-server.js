@@ -491,32 +491,62 @@ async function callAnthropicDirect(systemPrompt, userMessage, model = 'claude-so
 let totalTokens = { input: 0, output: 0, cost: 0 };
 const TOKEN_PRICE = { input: 0.003 / 1000, output: 0.015 / 1000 }; // Sonnet pricing
 
-// 請求隊列管理 - 確保同時只處理一個Claude請求
-let isProcessing = false;
-let requestQueue = [];
+// ========== 並發限制 + 請求隊列管理 ==========
+const MAX_CONCURRENT = 3;  // 最多3個智能體同時運行
+let activeRequests = 0;    // 當前運行中的請求數
+let requestQueue = [];     // 等待隊列
+let requestIdCounter = 0;  // 請求ID計數器
+
+// 獲取隊列狀態
+function getQueueStatus() {
+  return {
+    maxConcurrent: MAX_CONCURRENT,
+    activeRequests,
+    queueLength: requestQueue.length,
+    queue: requestQueue.map((req, i) => ({
+      position: i + 1,
+      agentId: req.agentId,
+      requestId: req.requestId
+    }))
+  };
+}
 
 async function processQueue() {
-  if (isProcessing || requestQueue.length === 0) return;
-  
-  isProcessing = true;
-  const { resolve, reject, systemPrompt, userMessage, agentId, options } = requestQueue.shift();
-  
-  try {
-    const result = await callClaudeInternal(systemPrompt, userMessage, agentId, options || {});
-    resolve(result);
-  } catch (err) {
-    reject(err);
-  } finally {
-    isProcessing = false;
-    processQueue(); // 處理下一個請求
+  // 如果達到並發上限或隊列為空，不處理
+  while (activeRequests < MAX_CONCURRENT && requestQueue.length > 0) {
+    const { resolve, reject, systemPrompt, userMessage, agentId, options, requestId } = requestQueue.shift();
+    activeRequests++;
+    console.log(`[Queue] 開始處理 ${agentId} (requestId: ${requestId}), 活躍: ${activeRequests}/${MAX_CONCURRENT}, 等待: ${requestQueue.length}`);
+    
+    // 異步處理，不阻塞循環
+    (async () => {
+      try {
+        const result = await callClaudeInternal(systemPrompt, userMessage, agentId, options || {});
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      } finally {
+        activeRequests--;
+        console.log(`[Queue] 完成 ${agentId}, 活躍: ${activeRequests}/${MAX_CONCURRENT}, 等待: ${requestQueue.length}`);
+        processQueue(); // 處理下一個
+      }
+    })();
   }
 }
 
 // 包裝函數，將請求加入隊列
 async function callClaude(systemPrompt, userMessage, agentId = '', options = {}) {
   return new Promise((resolve, reject) => {
-    requestQueue.push({ resolve, reject, systemPrompt, userMessage, agentId, options });
-    console.log(`[Queue] Added request, queue length: ${requestQueue.length}`);
+    const requestId = ++requestIdCounter;
+    const queuePosition = requestQueue.length + 1;
+    requestQueue.push({ resolve, reject, systemPrompt, userMessage, agentId, options, requestId });
+    
+    if (activeRequests >= MAX_CONCURRENT) {
+      console.log(`[Queue] 🔄 ${agentId} 加入等待隊列，位置: ${queuePosition}`);
+    } else {
+      console.log(`[Queue] ⚡ ${agentId} 直接處理`);
+    }
+    
     processQueue();
   });
 }
@@ -1351,6 +1381,11 @@ app.get(['/health', '/api/health'], async (req, res) => {
     tokenUsage: totalTokens,
     config: runtimeConfig
   });
+});
+
+// 獲取隊列狀態 - 前端輪詢用
+app.get('/api/queue', (req, res) => {
+  res.json(getQueueStatus());
 });
 
 // 获取可用providers
