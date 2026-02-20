@@ -2321,6 +2321,62 @@ app.get('/api/generate-image/status', (req, res) => {
 
 console.log(`🖼️ 图像生成 API ${REPLICATE_API_KEY ? '已启用' : '未启用 (需要REPLICATE_API_KEY)'}`);
 
+// ========== 阿里云通义万相 - 圖片生成 ==========
+import { generateImage, generateCharacterImages } from './aliyun-image.js';
+
+const ALIYUN_API_KEY = process.env.ALIYUN_API_KEY;
+
+// 單張圖片生成
+app.post('/api/aliyun/generate', async (req, res) => {
+    if (!ALIYUN_API_KEY) {
+        return res.status(400).json({ error: 'ALIYUN_API_KEY 未配置' });
+    }
+    
+    const { prompt, size, negativePrompt } = req.body;
+    if (!prompt) {
+        return res.status(400).json({ error: '缺少 prompt' });
+    }
+    
+    try {
+        const result = await generateImage(prompt, { size, negativePrompt });
+        res.json({ success: true, ...result });
+    } catch (err) {
+        console.error('[Aliyun] 生成失敗:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 批量生成角色圖片
+app.post('/api/aliyun/characters', async (req, res) => {
+    if (!ALIYUN_API_KEY) {
+        return res.status(400).json({ error: 'ALIYUN_API_KEY 未配置' });
+    }
+    
+    const { characters } = req.body;
+    if (!characters || !Array.isArray(characters)) {
+        return res.status(400).json({ error: '缺少 characters 數組' });
+    }
+    
+    try {
+        const results = await generateCharacterImages(characters);
+        res.json({ success: true, characters: results });
+    } catch (err) {
+        console.error('[Aliyun] 批量生成失敗:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 檢查阿里云API狀態
+app.get('/api/aliyun/status', (req, res) => {
+    res.json({
+        enabled: !!ALIYUN_API_KEY,
+        model: 'wan2.6-t2i',
+        provider: '通義萬相'
+    });
+});
+
+console.log(`🖼️ 阿里云萬相 API ${ALIYUN_API_KEY ? '✅ 已啟用' : '❌ 未配置 (需要ALIYUN_API_KEY)'}`);
+
 // ========== 用户项目持久化存储 (Supabase + 本地备份) ==========
 import { initSupabase, isSupabaseEnabled, getUserProjects, saveUserProject, saveAllUserProjects } from './db.js';
 
