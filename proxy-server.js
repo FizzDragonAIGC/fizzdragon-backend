@@ -1073,13 +1073,16 @@ ${skillsContent}
       : (runtimeConfig.contentLimit || 2000);
     const truncatedContent = actualContent.length > limit ? actualContent.substring(0, limit) + '\n...(已截断，原文共' + actualContent.length + '字)' : actualContent;
     
-    // 🔧 format_adapter 特殊处理：把目标集数和时长放在最前面！
+    // 🔧 某些agent需要“把关键参数放最前面”，否则模型会忽略JSON背景
     // 参数可能在 context 里或 req.body 顶层
-    const targetEpisodes = context?.target_episodes || req.body.target_episodes;
-    const episodeDuration = context?.episode_duration || req.body.episode_duration || 3;
+    const targetEpisodes = context?.target_episodes || req.body.target_episodes || context?.targetEpisodes || req.body.targetEpisodes || context?.production?.episodes || req.body.production?.episodes;
+    const episodeDuration = context?.episode_duration || req.body.episode_duration || context?.durationMin || req.body.durationMin || context?.production?.durationMin || req.body.production?.durationMin || 3;
+    const shotsPerMin = context?.shotsPerMin || req.body.shotsPerMin || context?.production?.shotsPerMin || req.body.production?.shotsPerMin;
     const instruction = context?.instruction || req.body.instruction;
-    
+
     let userMessage;
+
+    // ============ format_adapter ============
     if (agentId === 'format_adapter' && targetEpisodes) {
       console.log(`[format_adapter] 參數: ${targetEpisodes}集 × ${episodeDuration}分鐘`);
       userMessage = `【重要製作規格 - 必須嚴格遵守！】
@@ -1093,6 +1096,23 @@ ${instruction || '請將劇本重組為短劇格式。'}
 
 劇本內容：
 ${truncatedContent}`;
+
+    // ============ narrative（章節規劃）===========
+    } else if (agentId === 'narrative' && targetEpisodes) {
+      console.log(`[narrative] 參數: ${targetEpisodes}集 × ${episodeDuration}分鐘`);
+      const shotInfo = shotsPerMin ? `\n• 鏡頭密度：${shotsPerMin} 鏡/分鐘（每集約 ${shotsPerMin * episodeDuration} 鏡）` : '';
+      userMessage = `【重要製作規格 - 必須嚴格遵守！】
+• 目標集數：${targetEpisodes} 集
+• 每集時長：${episodeDuration} 分鐘${shotInfo}
+
+⚠️ 你必須輸出恰好 ${targetEpisodes} 集的章節（JSON.chapters陣列），不多不少！
+
+${instruction || ''}
+
+内容：
+${truncatedContent}`;
+
+    // ============ default ============
     } else {
       userMessage = context 
         ? `背景：${JSON.stringify(context)}\n\n内容：\n${truncatedContent}`
