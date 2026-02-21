@@ -1074,14 +1074,22 @@ ${skillsContent}
     const truncatedContent = actualContent.length > limit ? actualContent.substring(0, limit) + '\n...(已截断，原文共' + actualContent.length + '字)' : actualContent;
     
     // 🔧 format_adapter 特殊处理：把目标集数和时长放在最前面！
+    // 参数可能在 context 里或 req.body 顶层
+    const targetEpisodes = context?.target_episodes || req.body.target_episodes;
+    const episodeDuration = context?.episode_duration || req.body.episode_duration || 3;
+    const instruction = context?.instruction || req.body.instruction;
+    
     let userMessage;
-    if (agentId === 'format_adapter' && context?.target_episodes) {
-      userMessage = `【重要製作規格 - 必須遵守！】
-• 目標集數：${context.target_episodes} 集
-• 每集時長：${context.episode_duration || 3} 分鐘
-• 每集字數：約 ${(context.episode_duration || 3) * 300} 字
+    if (agentId === 'format_adapter' && targetEpisodes) {
+      console.log(`[format_adapter] 參數: ${targetEpisodes}集 × ${episodeDuration}分鐘`);
+      userMessage = `【重要製作規格 - 必須嚴格遵守！】
+• 目標集數：${targetEpisodes} 集
+• 每集時長：${episodeDuration} 分鐘
+• 每集字數：約 ${episodeDuration * 300} 字
 
-${context.instruction || '請將劇本重組為短劇格式。'}
+⚠️ 你必須輸出恰好 ${targetEpisodes} 集的JSON！不多不少！
+
+${instruction || '請將劇本重組為短劇格式。'}
 
 劇本內容：
 ${truncatedContent}`;
