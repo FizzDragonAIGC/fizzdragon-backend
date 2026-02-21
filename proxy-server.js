@@ -1022,9 +1022,16 @@ app.post('/api/agent-stream/:agentId', async (req, res) => {
 // 单个Agent API路由
 app.post('/api/agent/:agentId', async (req, res) => {
   const { agentId } = req.params;
-  const { content, context, novel, title, userInput, useReasoner } = req.body;
+  const { content, context, novel, title, userInput, useReasoner, provider: requestedProvider } = req.body;
   const actualContent = content || novel || userInput || "";
   const options = { useReasoner: useReasoner === true };
+  
+  // 🆕 支持前端指定provider（临时切换）
+  const originalProvider = currentProvider;
+  if (requestedProvider && PROVIDERS[requestedProvider]) {
+    currentProvider = requestedProvider;
+    console.log(`[Provider] 临时切换到 ${requestedProvider}`);
+  }
   
   const agent = AGENTS[agentId];
   if (!agent) {
@@ -1103,6 +1110,9 @@ ${skillsContent}
       }
     }
     
+    // 🆕 恢复原provider
+    if (requestedProvider) currentProvider = originalProvider;
+    
     res.json({ 
       result: finalResult, 
       agent: agentId,
@@ -1110,9 +1120,13 @@ ${skillsContent}
       skillsUsed: agent.skills,
       tokens: result.tokens,
       totalTokens: totalTokens,
-      reasoning: thinkingContent  // 思考过程（<thinking>标签或DeepSeek reasoner）
+      reasoning: thinkingContent,  // 思考过程（<thinking>标签或DeepSeek reasoner）
+      provider: requestedProvider || currentProvider  // 🆕 返回使用的provider
     });
   } catch (err) {
+    // 🆕 恢复原provider
+    if (requestedProvider) currentProvider = originalProvider;
+    
     console.error(`[${agent.name}] Error:`, err.message);
     // 🔧 确保错误响应也有CORS头
     res.setHeader('Access-Control-Allow-Origin', '*');
