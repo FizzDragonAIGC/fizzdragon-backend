@@ -733,7 +733,7 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
     throw new Error(`Missing API key for ${currentProvider}. Set ${currentProvider.toUpperCase()}_API_KEY in .env`);
   }
   
-  const needsLongOutput = ['storyboard', 'narrative', 'chapters', 'concept', 'screenwriter', 'character'].includes(agentId);
+  const needsLongOutput = ['storyboard', 'narrative', 'chapters', 'concept', 'screenwriter', 'character', 'novelist', 'story_architect', 'episode_planner'].includes(agentId);
   // 🔧 分镜不再强制使用reasoner（太慢），改用普通模型+更大max_tokens
   // 前端可以指定useReasoner强制使用
   const useReasoner = options.useReasoner === true && currentProvider === 'deepseek';
@@ -741,7 +741,7 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
   
   // 分镜/小说需要更多tokens
   // deepseek-chat max 8K，长内容设16K（会自动截断但能返回部分结果）
-  const longOutputAgents = ['storyboard', 'novelist', 'screenwriter', 'narrative'];
+  const longOutputAgents = ['storyboard', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner'];
   const maxTokens = useReasoner ? 64000 : (longOutputAgents.includes(agentId) ? 16384 : (needsLongOutput ? 8192 : 4096));
   
   console.log(`Calling ${provider.name} (${agentId || 'unknown'}) model: ${model}, max_tokens: ${maxTokens}`);
