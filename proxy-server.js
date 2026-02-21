@@ -1073,9 +1073,23 @@ ${skillsContent}
       : (runtimeConfig.contentLimit || 2000);
     const truncatedContent = actualContent.length > limit ? actualContent.substring(0, limit) + '\n...(已截断，原文共' + actualContent.length + '字)' : actualContent;
     
-    const userMessage = context 
-      ? `背景：${JSON.stringify(context)}\n\n内容：\n${truncatedContent}`
-      : `内容：\n${truncatedContent}`;
+    // 🔧 format_adapter 特殊处理：把目标集数和时长放在最前面！
+    let userMessage;
+    if (agentId === 'format_adapter' && context?.target_episodes) {
+      userMessage = `【重要製作規格 - 必須遵守！】
+• 目標集數：${context.target_episodes} 集
+• 每集時長：${context.episode_duration || 3} 分鐘
+• 每集字數：約 ${(context.episode_duration || 3) * 300} 字
+
+${context.instruction || '請將劇本重組為短劇格式。'}
+
+劇本內容：
+${truncatedContent}`;
+    } else {
+      userMessage = context 
+        ? `背景：${JSON.stringify(context)}\n\n内容：\n${truncatedContent}`
+        : `内容：\n${truncatedContent}`;
+    }
     
     const result = await callClaude(systemPrompt, userMessage, agentId, options);
     
