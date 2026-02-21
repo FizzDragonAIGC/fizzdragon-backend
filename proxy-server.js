@@ -698,6 +698,7 @@ async function callWithRetry(callFn, agentId = '') {
 // 带Provider备份的调用
 async function callWithFallback(systemPrompt, userMessage, agentId = '', options = {}) {
   const originalProvider = currentProvider;
+  let lastError = null;
   
   for (const provider of FALLBACK_PROVIDERS) {
     if (!process.env[`${provider.toUpperCase()}_API_KEY`] && provider !== 'deepseek') {
@@ -713,12 +714,13 @@ async function callWithFallback(systemPrompt, userMessage, agentId = '', options
       currentProvider = originalProvider;
       return result;
     } catch (err) {
-      console.log(`❌ ${provider} 失败，尝试下一个Provider...`);
+      console.log(`❌ ${provider} 失败 (${agentId}): ${err.message}`);
+      lastError = err;
     }
   }
   
   currentProvider = originalProvider;
-  throw new Error(`所有Provider都失败了 (${agentId})`);
+  throw new Error(`所有Provider都失败了 (${agentId}): ${lastError?.message || '未知错误'}`);
 }
 
 // ========== DeepSeek/OpenRouter API调用 (OpenAI兼容) ==========
