@@ -1065,8 +1065,12 @@ ${skillsContent}
 **重要：请基于以上方法论，深度分析用户提供的内容。你的回答必须体现出对内容的具体理解，不能给出通用的模板回答。**`;
 
     // 根据版本配置限制内容长度
-    const limit = runtimeConfig.contentLimit || 2000;
-    const truncatedContent = actualContent.length > limit ? actualContent.substring(0, limit) + '\n...(已截断)' : actualContent;
+    // 🔧 格式重组/剧本解析需要完整内容，使用更高限制
+    const longContentAgents = ['format_adapter', 'script_parser', 'novelist', 'screenwriter'];
+    const limit = longContentAgents.includes(agentId) 
+      ? 50000  // 长内容agent: 5万字上限
+      : (runtimeConfig.contentLimit || 2000);
+    const truncatedContent = actualContent.length > limit ? actualContent.substring(0, limit) + '\n...(已截断，原文共' + actualContent.length + '字)' : actualContent;
     
     const userMessage = context 
       ? `背景：${JSON.stringify(context)}\n\n内容：\n${truncatedContent}`
