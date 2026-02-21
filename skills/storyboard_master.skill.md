@@ -151,11 +151,12 @@ Cinematic [shot_type] shot, [angle], [movement].
 
 ---
 
-## 九、輸出JSON (13列)
+## 九、輸出JSON（新格式：14列）
 
 ```json
 {
-  "shot_id": "E01_S001",
+  "scene_no": 1,
+  "shot_no": 1,
   "scene": "場景位置",
   "time": "時間段",
   "lighting": "光線描述",
@@ -163,9 +164,9 @@ Cinematic [shot_type] shot, [angle], [movement].
   "character": "出場角色",
   "action": "動作描述",
   "dialogue": "台詞對白",
-  "camera": "機位角度",
   "movement": "運鏡方式",
   "shot_type": "景別",
+  "description": "畫面描述（取代舊的camera/機位角度欄位）",
   "Image_Prompt": "英文50-150詞",
   "Video_Prompt": "英文30-80詞"
 }

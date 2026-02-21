@@ -240,13 +240,14 @@ A terrified young Chinese opera boy slowly turns his head towards the door. Cand
 
 ---
 
-## 九、輸出JSON格式（13列專業分鏡）
+## 九、輸出JSON格式（新格式：14列專業分鏡）
 
-每個鏡頭必須包含以下13個核心字段：
+每個鏡頭必須包含以下14個核心字段（新格式）：
 
 ```json
 {
-  "shot_id": "E001_S001",
+  "scene_no": 1,
+  "shot_no": 1,
   "scene": "咖啡廳內",
   "time": "傍晚",
   "lighting": "暖黃燈光，窗外夕陽",
@@ -254,9 +255,9 @@ A terrified young Chinese opera boy slowly turns his head towards the door. Cand
   "character": "小雷、阿欣",
   "action": "小雷低頭攪動咖啡，阿欣靠近輕拍她肩膀",
   "dialogue": "阿欣：別想太多，我們會找到真相的。",
-  "camera": "眼平",
   "movement": "緩推",
   "shot_type": "中景",
+  "description": "畫面描述：中景，眼平視角，咖啡廳內兩位女孩，暖色夕陽與室內燈光交織",
   "Image_Prompt": "Cinematic medium shot of two young Hong Kong women in a warm coffee shop, golden hour light streaming through windows. One girl stirs coffee with downcast eyes, wearing casual streetwear. Her friend reaches to pat her shoulder comfortingly. Warm amber tones, shallow depth of field, 35mm anamorphic, film grain. 8K --ar 16:9",
   "Video_Prompt": "Medium shot, camera slowly pushes in. A young woman stirs her coffee pensively. Her friend gently pats her shoulder. Warm coffee shop interior, golden hour lighting through large windows. Subtle ambient movement. 4 seconds."
 }
@@ -266,17 +267,18 @@ A terrified young Chinese opera boy slowly turns his head towards the door. Cand
 
 | 字段 | 必填 | 說明 | 範例 |
 |------|------|------|------|
-| shot_id | ✅ | 鏡頭編號 | E01_S001 |
+| scene_no | ✅ | Scene No.（場景號） | 1 |
+| shot_no | ✅ | Shot No.（鏡頭號） | 1 |
 | scene | ✅ | 場景位置 | 咖啡廳內/街頭/公寓 |
 | time | ✅ | 時間段 | 清晨/正午/傍晚/深夜 |
 | lighting | ✅ | 光線描述 | 逆光/暖黃/霓虹/冷白 |
 | mood | ✅ | 氛圍情緒 | 緊張/溫馨/壓抑/興奮 |
 | character | ✅ | 出場角色 | 小雷/小雷、阿欣 |
 | action | ✅ | 動作描述 | 轉身離開/握拳/淚流滿面 |
-| dialogue | ⭕ | 台詞對白 | 角色：台詞內容 |
-| camera | ✅ | 機位角度 | 眼平/俯拍/仰拍/斜角 |
+| dialogue | ⭕ | 台詞對白 | 角色：台詞內容（無則"-"） |
 | movement | ✅ | 運鏡方式 | 固定/推/拉/搖/移/跟 |
-| shot_type | ✅ | 景別 | 特寫/近景/中景/全景/遠景 |
+| shot_type | ✅ | 景別（中文） | 特寫/近景/中景/全景/遠景 |
+| description | ✅ | 畫面描述（取代camera/機位，避免與景別混淆） | 中景眼平、主體與背景構圖 |
 | Image_Prompt | ✅ | 圖片生成詞 | 英文50-150詞 |
 | Video_Prompt | ✅ | 視頻生成詞 | 英文30-80詞 |
 

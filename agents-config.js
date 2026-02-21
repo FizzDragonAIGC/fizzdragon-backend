@@ -432,12 +432,32 @@ export const AGENTS = {
             'screenplay_complete',      // 劇本格式
             'novel_processing_complete' // 小說處理
         ],  // 🔥 使用所有9個核心Skill！
-        prompt: `你是專業AI視頻分鏡師。根據劇本生成完整的13列分鏡表。
+        prompt: `你是專業AI視頻分鏡師。根據劇本生成行業標準分鏡表（新格式）。
 
 ## 🚨 重要限制：每次請求最多生成20個鏡頭！
 如果劇本需要更多鏡頭，只生成前20個最重要的，並在結尾標註"(待續...)"
 
-## 🚨🚨🚨 關鍵要求：每個鏡頭必須填寫全部13個字段！
+## 🚨🚨🚨 關鍵要求：每個鏡頭必須填寫全部字段！（新格式共14列）
+
+### ✅ 新分鏡字段定義（請嚴格使用這些key）
+- `scene_no`：Scene No.（場景號/集內序號，整數）
+- `shot_no`：Shot No.（鏡頭號，整數）
+- `scene`：場景（地點/場次描述）
+- `time`：時間段
+- `lighting`：光線
+- `mood`：氛圍/情緒
+- `character`：角色
+- `action`：動作/表演
+- `dialogue`：台詞（無則"-")
+- `movement`：運鏡
+- `shot_type`：景別（中文，如：特寫/近景/中景/全景/遠景）
+- `description`：畫面描述（取代舊的"camera/機位"欄位）
+- `Image_Prompt`：英文（50-120詞）
+- `Video_Prompt`：英文（30-80詞）
+
+## ⚠️ 注意
+- 不要輸出 `shot_id`
+- 不要輸出 `camera`
 
 ## 完整示例（必須按此格式輸出）
 
@@ -447,7 +467,8 @@ export const AGENTS = {
   "episode_title": "童年記憶",
   "storyboard": [
     {
-      "shot_id": "E01_S001",
+      "scene_no": 1,
+      "shot_no": 1,
       "scene": "阿拉巴馬州小鎮街道",
       "time": "清晨",
       "lighting": "柔和晨光，金色陽光斜照",
@@ -455,14 +476,15 @@ export const AGENTS = {
       "character": "福雷斯特（幼年）",
       "action": "坐在長椅上，低頭看著腳上的矯正鞋",
       "dialogue": "-",
-      "camera": "眼平",
       "movement": "固定",
       "shot_type": "中景",
+      "description": "畫面描述：中景，眼平視角，主角坐在長椅，背景是50年代小鎮街道",
       "Image_Prompt": "Cinematic medium shot of a young boy sitting on a bench, looking down at his leg braces, 1950s Alabama small town street, warm golden morning light, nostalgic atmosphere, shallow depth of field, film grain, 8K, --ar 16:9",
       "Video_Prompt": "Static medium shot, young boy sitting on bench, soft morning light, nostalgic 1950s America, cinematic, 4 seconds"
     },
     {
-      "shot_id": "E01_S002",
+      "scene_no": 2,
+      "shot_no": 1,
       "scene": "校車內部",
       "time": "上午",
       "lighting": "窗外陽光透入，車內半明半暗",
@@ -470,9 +492,9 @@ export const AGENTS = {
       "character": "福雷斯特、詹妮",
       "action": "福雷斯特走上校車，其他孩子不讓他坐",
       "dialogue": "孩子們：這個位置有人了！",
-      "camera": "過肩",
       "movement": "跟拍",
       "shot_type": "中景",
+      "description": "畫面描述：過肩中景，跟拍主角走在校車走道，孩子們回頭拒絕",
       "Image_Prompt": "Cinematic over-shoulder shot inside a 1950s school bus, young boy with leg braces walking down the aisle, other children blocking seats, warm sunlight through windows, tense atmosphere, 35mm anamorphic, 8K, --ar 16:9",
       "Video_Prompt": "Tracking shot following boy walking down bus aisle, children turning away, sunlight streaming through windows, cinematic, 3 seconds"
     }
@@ -504,9 +526,9 @@ export const AGENTS = {
 - ✅ character: 具體角色名
 - ✅ action: 具體動作描述
 - ✅ dialogue: 有對白寫對白，無對白寫「-」
-- ✅ camera: 具體機位
 - ✅ movement: 具體運鏡
 - ✅ shot_type: 具體景別
+- ✅ description: 畫面描述（取代舊的camera/機位）
 - ✅ Image_Prompt: 完整英文描述50-120詞
 - ✅ Video_Prompt: 完整英文描述30-80詞
 
