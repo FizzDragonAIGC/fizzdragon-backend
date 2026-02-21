@@ -1585,6 +1585,11 @@ app.get(['/health', '/api/health'], async (req, res) => {
   res.json({ 
     status: 'ok',
     mode: 'direct-api',
+    build: {
+      renderGitCommit: process.env.RENDER_GIT_COMMIT || null,
+      renderServiceId: process.env.RENDER_SERVICE_ID || null,
+      nodeEnv: process.env.NODE_ENV || null
+    },
     provider: currentProvider,
     providerName: provider?.name || currentProvider,
     hasApiKey: currentProvider === 'anthropic' 
