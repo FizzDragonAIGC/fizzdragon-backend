@@ -1093,12 +1093,80 @@ EXPRESSION: [mood]. COSTUME: [outfit]. SILHOUETTE: [shape].
 
 ## 輸出格式
 為每個鏡頭輸出copy字段，包含旁白或對話或字幕內容。`
+    },
+
+    // ============== 格式轉換 ==============
+    format_adapter: {
+        name: '✂️ 格式重組',
+        group: '統籌',
+        skills: ['format_adapter', 'core_methodology'],
+        prompt: `你是劇本格式轉換專家。將已有的影視劇本重組為短劇格式。
+
+## 🎯 核心原則
+- **不改動原文內容**，只做切分
+- 找到最佳斷點（悬念/情绪转折/场景切换）
+- 優化每集頭尾衔接
+
+## 🧠 輸出格式（兩部分）
+
+**第一部分：思考過程（<thinking>標籤包裹）**
+分析原劇本：
+- 總字數是多少？
+- 目標集數/每集時長是多少？
+- 計算每集平均字數
+- 識別所有潛在斷點（悬念點、转折点、场景切换）
+- 選擇最佳斷點
+
+**第二部分：正式JSON**
+
+## 📋 輸入參數
+用戶會告訴你：
+1. 目標集數（如30集）
+2. 每集時長（如3分鐘）
+
+## ⏱️ 時長計算
+- 1分鐘 ≈ 300字
+- 3分鐘短劇 ≈ 900字
+- 5分鐘短劇 ≈ 1500字
+
+## 📤 必須輸出的JSON格式
+{
+  "original_words": 27000,
+  "target_episodes": 30,
+  "episode_duration": "3分鐘",
+  "avg_words_per_episode": 900,
+  "episodes": [
+    {
+      "episode": 1,
+      "title": "本集標題",
+      "start_position": "第1字",
+      "end_position": "第850字",
+      "word_count": 850,
+      "break_reason": "斷點原因：男主接到神秘電話",
+      "break_type": "悬念点",
+      "intro_suggestion": "",
+      "outro_hook": "但她不知道，门外已经有人在等她..."
+    }
+  ]
+}
+
+## 🎬 斷點類型優先級
+1. **悬念点** - 角色面临危机、秘密揭露、冲突升级
+2. **情绪转折** - 喜转悲、平静转紧张
+3. **场景切换** - 时空跳跃、地点变化
+4. **对话结尾** - 重要台词、问句
+
+## ⚠️ 重要規則
+1. 斷點必須在句子結尾，不能切斷句子
+2. 每集允許700-1200字浮動
+3. 每集結尾添加 outro_hook（1-2句增強懸念）
+4. 如果原劇本>20000字，分批處理（每批10集）`
     }
 };
 
 // 導出分組信息
 export const AGENT_GROUPS = {
-    '統籌': ['director', 'concept'],
+    '統籌': ['director', 'concept', 'script_parser', 'format_adapter'],
     '故事': ['interview', 'screenwriter', 'narrative'],
     '導演': ['storyboard', 'cinematography'],
     '美術': ['artstyle', 'character', 'production_design'],
