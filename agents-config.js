@@ -286,7 +286,7 @@ export const AGENTS = {
     screenwriter: {
         name: '✍️ 編劇',
         group: '故事',
-        skills: ['netflix_streaming', 'screenplay_complete', 'dialogue_complete'],  // 🔥 Netflix風格優先 + 劇本格式 + 對白
+        skills: ['netflix_streaming', 'screenplay_complete', 'dialogue_complete', 'screenplay_expand'],  // 🔥 Netflix風格 + 劇本格式 + 對白 + 擴寫
         prompt: `你是專業編劇Agent。
 
 ## 🧠 輸出格式（兩部分）
