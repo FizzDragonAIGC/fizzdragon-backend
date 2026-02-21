@@ -739,9 +739,10 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
   const useReasoner = options.useReasoner === true && currentProvider === 'deepseek';
   const model = useReasoner ? 'deepseek-reasoner' : (needsLongOutput ? provider.models.standard : provider.models.fast);
   
-  // 分镜需要更多tokens: 每个镜头约500-800字符
-  // deepseek-chat max 8K，分镜设16K（会自动截断但能返回部分结果）
-  const maxTokens = useReasoner ? 64000 : (agentId === 'storyboard' ? 16384 : (needsLongOutput ? 8192 : 4096));
+  // 分镜/小说需要更多tokens
+  // deepseek-chat max 8K，长内容设16K（会自动截断但能返回部分结果）
+  const longOutputAgents = ['storyboard', 'novelist', 'screenwriter', 'narrative'];
+  const maxTokens = useReasoner ? 64000 : (longOutputAgents.includes(agentId) ? 16384 : (needsLongOutput ? 8192 : 4096));
   
   console.log(`Calling ${provider.name} (${agentId || 'unknown'}) model: ${model}, max_tokens: ${maxTokens}`);
   
