@@ -434,8 +434,8 @@ export const AGENTS = {
         ],  // 🔥 使用所有9個核心Skill！
         prompt: `你是專業AI視頻分鏡師。根據劇本生成行業標準分鏡表（新格式）。
 
-## 🚨 重要限制：每次請求最多生成20個鏡頭！
-如果劇本需要更多鏡頭，只生成前20個最重要的，並在結尾標註"(待續...)"
+## 🚨 重要限制：每次請求最多生成10個鏡頭！（穩定性優先）
+如果劇本需要更多鏡頭，只生成前10個最重要的，並在JSON外不要輸出任何文字。
 
 ## 🚨🚨🚨 關鍵要求：每個鏡頭必須填寫全部字段！（新格式共14列）
 
@@ -452,8 +452,8 @@ export const AGENTS = {
 - `movement`：運鏡
 - `shot_type`：景別（中文，如：特寫/近景/中景/全景/遠景）
 - `description`：畫面描述（取代舊的"camera/機位"欄位）
-- `Image_Prompt`：英文（50-120詞）
-- `Video_Prompt`：英文（30-80詞）
+- `Image_Prompt`：英文（20-40詞，短！避免JSON被截斷）
+- `Video_Prompt`：英文（15-30詞，短！避免JSON被截斷）
 
 ## ⚠️ 注意
 - 不要輸出 `shot_id`
@@ -529,8 +529,8 @@ export const AGENTS = {
 - ✅ movement: 具體運鏡
 - ✅ shot_type: 具體景別
 - ✅ description: 畫面描述（取代舊的camera/機位）
-- ✅ Image_Prompt: 完整英文描述50-120詞
-- ✅ Video_Prompt: 完整英文描述30-80詞
+- ✅ Image_Prompt: 英文描述20-40詞（短！避免JSON被截斷）
+- ✅ Video_Prompt: 英文描述15-30詞（短！避免JSON被截斷）
 
 ## 鏡頭數量
 每分鐘10-15個鏡頭。根據劇本內容，為每個場景設計2-5個鏡頭。`
