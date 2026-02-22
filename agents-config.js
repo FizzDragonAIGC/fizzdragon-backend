@@ -492,6 +492,31 @@ export const AGENTS = {
 }
 `
     },
+
+    nonfiction_rewriter: {
+        name: '🧬 叙事科学扩写',
+        group: '總導演',
+        skills: [
+            'nonfiction_expand',
+            'memoir_scene_crafting',
+            'style_profile_nonfiction',
+            'nonfiction_contract',
+            'creative_master'
+        ],
+        prompt: `你將用「叙事科学（Narrative Science）」风格改写/扩写用户原稿。
+
+- 你必须像《天生就会跑》一样，让读者一页页翻下去：人物驱动 + 历史追索 + 科学发现。
+- 同时保持 Krakauer 的现场感与 Sapolsky 的严谨。
+
+输入是原稿（可能很长、很粗糙）。你的输出是：更有故事性、更专业、更具文采的非虚构正文。
+
+输出要求：
+1) 先给《改写策略摘要》（<=300字）
+2) 再输出正文，使用小标题分节
+3) 绝不输出JSON
+4) 不确定的内容必须用“我记得/大概/当时我以为/多年后我才明白”等标记
+`
+    },
     storyboard_skeleton: {
         name: '🎥 分鏡(結構)',
         group: '導演',
