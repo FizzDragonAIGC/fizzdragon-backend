@@ -1138,26 +1138,37 @@ ${truncatedContent}`;
     }
     
     // 🔧 处理DeepSeek混在content里的思考过程（没有标签的情况）
-    // 检测是否需要JSON输出，如果是，提取JSON部分
-    if (needsJsonOutput(agentId) && finalResult.includes('{')) {
-      // 找到第一个 { 和最后一个 }
-      const firstBrace = finalResult.indexOf('{');
-      const lastBrace = finalResult.lastIndexOf('}');
-      if (firstBrace !== -1 && lastBrace > firstBrace) {
-        const potentialJson = finalResult.substring(firstBrace, lastBrace + 1);
-        try {
-          // 验证是有效JSON
-          JSON.parse(potentialJson);
-          // 如果有效，保存思考过程，只返回JSON
-          if (firstBrace > 50) {  // 前面有大量非JSON文本=思考过程
-            thinkingContent = finalResult.substring(0, firstBrace).trim();
-            console.log(`[${agent.name}] Stripped ${firstBrace} chars of thinking from content`);
+    // 检测是否需要JSON输出，如果是，提取JSON部分；若最终仍非JSON，则返回“错误JSON”避免前端对话框混入分析文本
+    if (needsJsonOutput(agentId)) {
+      const tryParse = (s) => {
+        try { JSON.parse(s); return true; } catch { return false; }
+      };
+
+      // 1) 粗提取：第一個{到最後一個}
+      if (finalResult && finalResult.includes('{')) {
+        const firstBrace = finalResult.indexOf('{');
+        const lastBrace = finalResult.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+          const potentialJson = finalResult.substring(firstBrace, lastBrace + 1);
+          if (tryParse(potentialJson)) {
+            if (firstBrace > 50) {
+              thinkingContent = finalResult.substring(0, firstBrace).trim();
+              console.log(`[${agent.name}] Stripped ${firstBrace} chars of thinking from content`);
+            }
+            finalResult = potentialJson;
           }
-          finalResult = potentialJson;
-        } catch (e) {
-          // JSON解析失败，保持原样
-          console.log(`[${agent.name}] JSON extraction failed, keeping original`);
         }
+      }
+
+      // 2) 兜底：若仍不是有效JSON，直接包成JSON错误（避免把分析文字返回给前端）
+      if (!tryParse(finalResult)) {
+        console.log(`[${agent.name}] Non-JSON output detected; wrapping as error JSON`);
+        finalResult = JSON.stringify({
+          error: 'non_json_output',
+          agent: agentId,
+          message: '模型未按要求输出纯JSON（已拦截非JSON文本）。请重试。',
+          raw: String(finalResult || '').slice(0, 8000)
+        });
       }
     }
     
