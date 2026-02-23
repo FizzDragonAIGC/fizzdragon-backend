@@ -123,8 +123,6 @@ function needsJsonOutput(agentId) {
     'dialogue',      // 對話
     'acting',        // 演技指導
     'interview',     // 訪談 - 輸出問題
-    'nonfiction_rewriter', // 非虛構擴寫 - 輸出正文
-    'nonfiction_writer',   // 非虛構藍圖 - 也可輸出自然語言（但我們主要用JSON），保守设为自然語言以免被强制JSON
   ];
   
   // 這些Agent需要JSON結構化輸出
