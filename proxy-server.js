@@ -4,6 +4,8 @@
 import 'dotenv/config';  // 加载.env文件
 import express from 'express';
 import cors from 'cors';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -300,10 +302,84 @@ app.options('*', (req, res) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(join(__dirname, '..')));
 
-// ==================== 用户认证系统 ====================
+// ==================== 用户认证系统（注册/登录/JWT）====================
 
 const USERS_FILE = join(__dirname, 'users.json');
 const userRequests = new Map(); // 用户当前请求状态
+
+// 注册
+app.post('/api/auth/register', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: '缺少 username/password' });
+  if (String(username).length < 3) return res.status(400).json({ error: '用户名至少3位' });
+  if (String(password).length < 6) return res.status(400).json({ error: '密码至少6位' });
+
+  const users = loadUsers();
+  // users: { byUsername: { [username]: user } }
+  const byUsername = users.byUsername || {};
+  if (byUsername[username]) return res.status(400).json({ error: '用户名已存在' });
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const user = { id: crypto.randomUUID(), username, passwordHash, createdAt: new Date().toISOString() };
+  byUsername[username] = user;
+  users.byUsername = byUsername;
+  saveUsers(users);
+
+  const token = issueToken(user);
+  res.json({ token, user: { id: user.id, username: user.username } });
+});
+
+// 登录
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: '缺少 username/password' });
+
+  const users = loadUsers();
+  const user = users.byUsername?.[username];
+  if (!user) return res.status(400).json({ error: '用户名或密码错误' });
+
+  const ok = await bcrypt.compare(password, user.passwordHash);
+  if (!ok) return res.status(400).json({ error: '用户名或密码错误' });
+
+  const token = issueToken(user);
+  res.json({ token, user: { id: user.id, username: user.username } });
+});
+
+// 验证
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({ user: { id: req.user.id, username: req.user.username } });
+});
+
+// 兼容旧前端：verify/logout
+app.get('/api/auth/verify', requireAuth, (req, res) => {
+  res.json({ ok: true, user: { id: req.user.id, username: req.user.username } });
+});
+app.post('/api/auth/logout', (req, res) => {
+  // JWT无服务端会话，前端清token即可
+  res.json({ ok: true });
+});
+
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
+if (!process.env.JWT_SECRET) {
+  console.warn('⚠️ JWT_SECRET 未配置：当前为临时密钥（重启会使登录失效）。请在Render环境变量中设置 JWT_SECRET');
+}
+
+function issueToken(user) {
+  return jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30d' });
+}
+
+function requireAuth(req, res, next) {
+  try {
+    const auth = req.headers.authorization || '';
+    const m = auth.match(/^Bearer\s+(.+)$/i);
+    if (!m) return res.status(401).json({ error: 'Unauthorized' });
+    const payload = jwt.verify(m[1], JWT_SECRET);
+    req.user = payload;
+    return next();
+  } catch (e) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+}
 
 // 读取用户数据
 function loadUsers() {
@@ -2632,9 +2708,9 @@ try {
   console.warn('无法创建用户项目目录:', e.message);
 }
 
-// 获取用户项目 (優先 Supabase)
-app.get('/api/user-projects/:userId', async (req, res) => {
-  const { userId } = req.params;
+// 获取用户项目 (需要登录；后端从JWT取userId，忽略URL参数)
+app.get('/api/user-projects/:userId', requireAuth, async (req, res) => {
+  const userId = req.user.id;
   
   // 優先從 Supabase 讀取
   if (isSupabaseEnabled()) {
@@ -2659,9 +2735,9 @@ app.get('/api/user-projects/:userId', async (req, res) => {
   }
 });
 
-// 保存用户项目 (同時寫 Supabase + 本地)
-app.post('/api/user-projects/:userId', async (req, res) => {
-  const { userId } = req.params;
+// 保存用户项目 (需要登录；后端从JWT取userId，忽略URL参数)
+app.post('/api/user-projects/:userId', requireAuth, async (req, res) => {
+  const userId = req.user.id;
   const projects = req.body;
   const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
   
@@ -2682,9 +2758,10 @@ app.post('/api/user-projects/:userId', async (req, res) => {
   }
 });
 
-// 同步单个项目（增量更新）
-app.put('/api/user-projects/:userId/:projectId', async (req, res) => {
-  const { userId, projectId } = req.params;
+// 同步单个项目（增量更新，需要登录；后端从JWT取userId，忽略URL参数）
+app.put('/api/user-projects/:userId/:projectId', requireAuth, async (req, res) => {
+  const { projectId } = req.params;
+  const userId = req.user.id;
   const projectData = req.body;
   const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
   
