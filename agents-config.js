@@ -430,6 +430,8 @@ storyboard_skeleton: {
         skills: [
             // ✅ 用你們「培訓好的完整版分鏡」：帶情緒/表演/光影/節奏/Prompt公式
             'storyboard_complete',
+            // ✅ 演技/眼神=演技（以可拍行為+節拍為核心）
+            'acting_complete',
             'creative_master',
             'screenplay_complete'
         ],
@@ -472,7 +474,9 @@ storyboard_skeleton: {
         skills: [
             // ✅ 用你們培訓好的分鏡完整方法論（含畫面/動作/表演/光影/Prompt公式）
             'storyboard_complete',
-            // ✅ 強制明確視角/角度（POV/angle），並能自動選擇
+            // ✅ 演技/眼神=演技（以可拍行為+節拍為核心）
+            'acting_complete',
+            // ✅ 視角欄位
             'pov_viewpoint',
             // ✅ Prompt專用規範（補足鏡頭語言/一致性）
             'image_prompt',
