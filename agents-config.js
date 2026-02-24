@@ -428,7 +428,8 @@ storyboard_skeleton: {
         name: '🎥 分鏡(結構)',
         group: '導演',
         skills: [
-            'storyboard_master',
+            // ✅ 用你們「培訓好的完整版分鏡」：帶情緒/表演/光影/節奏/Prompt公式
+            'storyboard_complete',
             'creative_master',
             'screenplay_complete'
         ],
@@ -469,9 +470,15 @@ storyboard_skeleton: {
         name: '🧩 分鏡(Prompt補全)',
         group: '導演',
         skills: [
-            'storyboard_master',
-            // ✅ 明確視角/角度（POV/angle）必寫，並能自動選擇
-            'pov_viewpoint'
+            // ✅ 用你們培訓好的分鏡完整方法論（含畫面/動作/表演/光影/Prompt公式）
+            'storyboard_complete',
+            // ✅ 強制明確視角/角度（POV/angle），並能自動選擇
+            'pov_viewpoint',
+            // ✅ Prompt專用規範（補足鏡頭語言/一致性）
+            'image_prompt',
+            'video_prompt',
+            // ✅ 鏡頭語言/光影（補全時更穩）
+            'cinematography_complete'
         ],
         prompt: `你是AI影像提示詞專家。輸入是上一段生成的分鏡骨架JSON（包含storyboard陣列）。
 
