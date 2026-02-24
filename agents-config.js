@@ -469,7 +469,9 @@ storyboard_skeleton: {
         name: '🧩 分鏡(Prompt補全)',
         group: '導演',
         skills: [
-            'storyboard_master'
+            'storyboard_master',
+            // 增強鏡頭語言/視角/運鏡細節（避免prompt變薄）
+            'cinematography_complete'
         ],
         prompt: `你是AI影像提示詞專家。輸入是上一段生成的分鏡骨架JSON（包含storyboard陣列）。
 
