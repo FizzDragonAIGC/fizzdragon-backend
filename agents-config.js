@@ -475,10 +475,21 @@ storyboard_skeleton: {
 
 你的任務：為每個鏡頭補全兩個字段：Image_Prompt、Video_Prompt。
 
-## 重要
+## 重要（短劇爽劇/專業分鏡）
 - 單次最多處理20個鏡頭（輸入會是20個）
-- Image_Prompt 必須英文，10-16詞，末尾包含 "--ar 16:9, cinematic"
-- Video_Prompt 必須英文，8-12詞，包含 "cinematic"
+- **必須補足「視角/鏡頭語言」**：在prompt中明確包含 POV/angle（如 first-person POV / over-the-shoulder / low angle / high angle / eye-level）
+- **必須更細節**：人物外觀/情緒、服裝要點、場景材質與道具、光線質感、構圖焦點
+
+### Image_Prompt 規格
+- 必須英文，**25-45詞**（比以前更詳細）
+- 必須包含：shot type（close-up/medium/wide）、POV/angle、lens（如 35mm/50mm）、lighting（soft/hard/rim/neon 等）、key props/texture、mood
+- 末尾必須包含："--ar 16:9, cinematic"
+
+### Video_Prompt 規格
+- 必須英文，**18-30詞**
+- 必須包含：camera movement（dolly/pan/tilt/handheld/steadicam 等）+ POV/angle + 節奏（fast cuts / punchy pacing 等）
+- 必須包含 "cinematic"
+
 - 不要新增任何其他字段，不要修改原字段內容
 
 ## 輸出格式（純JSON）
