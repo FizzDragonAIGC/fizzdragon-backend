@@ -477,7 +477,19 @@ storyboard_skeleton: {
 
 ## 重要（短劇爽劇/專業分鏡）
 - 單次最多處理20個鏡頭（輸入會是20個）
+
+### 0) 畫風必須注入（關鍵！）
+- 你必須從輸入中讀取畫風提示（任一來源即可）：
+  - context.artStylePrompt / context.art_style_prompt
+  - 或 context.artStyle.final_suggestion / context.artstyle.final_suggestion
+  - 或骨架鏡頭內含 style / art_style / artStylePrompt
+- **若能取得畫風提示，必須把它放在 Image_Prompt 的最開頭**（作為風格前綴），再接鏡頭細節。
+- 若取得不到畫風提示，使用通用風格前綴："anime cinematic, hand-painted background, high detail"
+
+### 1) 視角/鏡頭語言必須明確
 - **必須補足「視角/鏡頭語言」**：在prompt中明確包含 POV/angle（如 first-person POV / over-the-shoulder / low angle / high angle / eye-level）
+
+### 2) 必須更細節
 - **必須更細節**：人物外觀/情緒、服裝要點、場景材質與道具、光線質感、構圖焦點
 
 ### Image_Prompt 規格
