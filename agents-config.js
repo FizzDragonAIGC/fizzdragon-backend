@@ -470,8 +470,8 @@ storyboard_skeleton: {
         group: '導演',
         skills: [
             'storyboard_master',
-            // 增強鏡頭語言/視角/運鏡細節（避免prompt變薄）
-            'cinematography_complete'
+            // ✅ 明確視角/角度（POV/angle）必寫，並能自動選擇
+            'pov_viewpoint'
         ],
         prompt: `你是AI影像提示詞專家。輸入是上一段生成的分鏡骨架JSON（包含storyboard陣列）。
 
