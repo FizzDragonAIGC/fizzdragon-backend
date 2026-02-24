@@ -503,6 +503,7 @@ storyboard_skeleton: {
 - **必須寫「眼睛/视线动作」(eye action)**：如 eyes dart, glance aside, eyes widen, pupils constrict, tears welling, eye contact breaks（只要镜头有人物，就要有一条与眼睛/视线相关的微表演细节）
 - **必須寫「表情/微表情」(facial expression)**：如 clenched jaw, forced smile, trembling lips, brow furrows, nostrils flare（人物镜头必须出现至少一条可视化微表情）
 - **必須補「音乐/音效提示」(music & SFX cue)**：在 Video_Prompt 或 视频描述里给出一句简短配乐/音效方向（例如："low synth drone", "soft piano motif", "heartbeat SFX", "string rise"），用来增强情绪节拍
+- **必須補「旁白/内心独白」(voiceover / inner monologue)**：若镜头承担信息解释、情绪推进、转场或钩子，则在 Video_Prompt 或 视频描述中加入一句短旁白（可用："VO:" 或 "Inner monologue:" 前缀）；不确定时宁可给一句简短旁白（≤12字中文或≤12词英文）
 
 ### Image_Prompt 規格
 - 必須英文，**25-45詞**（比以前更詳細）
