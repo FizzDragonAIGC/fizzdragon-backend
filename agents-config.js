@@ -500,6 +500,7 @@ storyboard_skeleton: {
 
 ### 2) 必須更細節
 - **必須更細節**：人物外觀/情緒、服裝要點、場景材質與道具、光線質感、構圖焦點
+- **必須寫「眼睛/视线动作」(eye action)**：如 eyes dart, glance aside, eyes widen, pupils constrict, tears welling, eye contact breaks（只要镜头有人物，就要有一条与眼睛/视线相关的微表演细节）
 
 ### Image_Prompt 規格
 - 必須英文，**25-45詞**（比以前更詳細）
