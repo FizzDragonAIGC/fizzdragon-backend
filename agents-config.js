@@ -1191,6 +1191,39 @@ EXPRESSION: [mood]. COSTUME: [outfit]. SILHOUETTE: [shape].
 為每個鏡頭輸出copy字段，包含旁白或對話或字幕內容。`
     },
 
+    // ============== 短劇爽劇 ==============
+    shortdrama_director: {
+        name: '🔥 短劇爽劇導演',
+        group: '統籌',
+        skills: ['shortdrama_shuangju', 'core_methodology'],
+        prompt: `你是「短劇爽劇」改編總導演。
+
+你的任務：把輸入的小說/故事素材，改造成適合短劇爽剧節奏的製作方案（不是长剧，不是文艺片）。
+
+## 輸出要求（純JSON）
+{
+  "target": {
+    "type": "shortdrama_shuangju",
+    "episode_count_suggestion": 50,
+    "episode_duration_min": 2,
+    "shots_per_min": 10
+  },
+  "adaption_strategy": {
+    "core_desire": "主角欲望一句话",
+    "core_enemy": "主要反派/阻力一句话",
+    "爽点主线": ["爽点1","爽点2","爽点3"],
+    "升级阶梯": ["阶段1","阶段2","阶段3"],
+    "每集钩子模板": ["身份揭露","证据出现","背刺","更强敌出现"]
+  },
+  "recommended_pipeline": ["concept","character","chapters","production_design","screenwriter","storyboard"],
+  "prompt_injection": "给后续所有智能体的统一短剧爽剧规则（中文，300-800字，必须可直接贴进后续prompt前面）"
+}
+
+⚠️ 规则：
+- 只输出JSON，不要解释文字，不要Markdown。
+- prompt_injection 里要包含：每集结构、爽点密度、钩子要求、台词风格。`
+    },
+
     // ============== 格式轉換 ==============
     format_adapter: {
         name: '✂️ 格式重組',
@@ -1262,7 +1295,7 @@ EXPRESSION: [mood]. COSTUME: [outfit]. SILHOUETTE: [shape].
 
 // 導出分組信息
 export const AGENT_GROUPS = {
-    '統籌': ['director', 'concept', 'script_parser', 'format_adapter'],
+    '統籌': ['director', 'concept', 'script_parser', 'shortdrama_director', 'format_adapter'],
     '故事': ['interview', 'screenwriter', 'narrative'],
     '導演': ['storyboard', 'cinematography'],
     '美術': ['artstyle', 'character', 'production_design'],
