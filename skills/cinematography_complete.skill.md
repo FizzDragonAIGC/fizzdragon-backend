@@ -195,6 +195,15 @@ shallow depth of field, cinematic, 8K
 - 浪漫/懷舊 → Golden Hour + Warm
 - 冷漠/科技 → Cool Blue + Hard
 
+### 色彩/配色（Color Palette）
+- 情緒導向：
+  - 溫暖/治癒 → 暖黃 + 木棕 + 米白
+  - 冷酷/科技 → 冷藍 + 鋼灰 + 霓虹青
+  - 危機/懸疑 → 深紫 + 墨黑 + 血紅
+- 提示格式建議：
+  - "color_palette": ["#主色", "#辅色", "#点缀色"]
+  - 或文本："暖金+木棕+雾蓝"
+
 ### 運鏡選擇
 - 情感深入 → Dolly In
 - 揭示孤獨 → Dolly Out
