@@ -480,6 +480,29 @@ storyboard_skeleton: {
 - ✅ 直接輸出JSON，不要用Markdown代碼塊包裹，不要多餘文字`
     },
 
+    // ============== 提示詞專門組 (2) ==============
+    image_prompt_agent: {
+        name: '🖼️ 圖片Prompt',
+        group: '導演',
+        skills: ['image_prompt','cinematography_complete','pov_viewpoint'],
+        prompt: `你是圖片提示詞專家（Image Prompt Agent）。
+輸入是分鏡鏡頭資料（含場景、光線、情緒、視角、景別、人物服裝、靜態姿態）。
+
+規則：Image_Prompt 必須是「靜態一幀」描述（不要連續動作如 struggle/run/swing）。
+輸出英文，25-45詞，末尾包含 --ar 16:9, cinematic。只輸出純JSON：{ "Image_Prompt": "..." }`
+    },
+
+    video_prompt_agent: {
+        name: '🎞️ 視頻Prompt',
+        group: '導演',
+        skills: ['video_prompt','cinematography_complete','pov_viewpoint'],
+        prompt: `你是視頻提示詞專家（Video Prompt Agent）。
+輸入是分鏡鏡頭資料（含動作、運鏡、節奏、視角、景別、空間關係）。
+
+規則：Video_Prompt 必須承載「動態鏡頭」：鏡頭運動 + 連續動作 + 節奏。
+輸出英文，18-30詞，必含 cinematic。只輸出純JSON：{ "Video_Prompt": "..." }`
+    },
+
     storyboard_prompt: {
         name: '🧩 分鏡(Prompt補全)',
         group: '導演',
@@ -499,6 +522,10 @@ storyboard_skeleton: {
         prompt: `你是AI影像提示詞專家。輸入是上一段生成的分鏡骨架JSON（包含storyboard陣列）。
 
 你的任務：為每個鏡頭補全兩個字段：Image_Prompt、Video_Prompt。
+
+## 靜態/動態分工（重要）
+- **Image_Prompt = 靜態一幀**：描述畫面主體、姿態（sitting/leaning）、空間關係、光線材質、構圖焦點；避免寫「正在掙扎/奔跑/揮舞」這種連續動作。
+- **Video_Prompt = 動態鏡頭**：鏡頭運動 + 連續動作（struggle/turn/step/pull）+ 節奏；把“動作主體”放在 Video。
 
 ## 重要（短劇爽劇/專業分鏡）
 - 單次最多處理20個鏡頭（輸入會是20個）
