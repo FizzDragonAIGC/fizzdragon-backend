@@ -93,6 +93,29 @@
 
 ## 五、鏡頭類型分布
 
+---
+
+## 0.5 新增：分集維度導演包（Episode-Level Direction Pack）【2026-03-06 重構】
+
+> 本 skill 原本以「逐鏡頭」給方法論，會導致：
+> - 人/道具/環境的物理關係在鏡頭間漂移
+> - 動作/表情缺少源頭與目的（演技不一致）
+> - 鏡頭語法不穩定（同場景左右跳、運鏡亂）
+>
+> ✅ 新方案：**先分集設計，再逐鏡頭落地**。每集先生成三本“聖經”，由「總導演」統一指令：
+> 1) 分集美術聖經 episode_art_bible（物理/服化道/人-道具-環境關係）
+> 2) 分集演技聖經 episode_acting_bible（trigger/objective/subtext/動作限制→表情結果）
+> 3) 分集攝影聖經 episode_camera_bible（機位錨點/鏡頭語法/運鏡節奏）
+>
+> 最終每個鏡頭必須把三者**強制注入**到 `description + Image_Prompt + Video_Prompt`，而不是只存在於導演筆記。
+>
+> 對接 skills：
+> - `chief_director_episode.skill.md`
+> - `episode_art_bible.skill.md`
+> - `episode_acting_bible.skill.md`
+> - `episode_camera_bible.skill.md`
+
+
 ### 景別要求
 | 景別 | 比例 | 用途 |
 |------|------|------|
@@ -162,6 +185,15 @@
 ❌ "CU, 小豆子, 恐懼"
 ✅ "特寫鏡頭，小豆子蜷縮角落，臉上滿是恐懼。眼睛緊盯門外，眼眶閃爍淚光。燭光在臉上投下搖曳陰影，畫面籠罩灰藍色調。"
 ```
+
+**角色命名要求（必須）**
+- 画面描述 / Image_Prompt / Video_Prompt **必須包含具體角色名**（如 Arian/Jake）
+- 禁止使用「男人/女人/男/女/人」等泛稱作主體
+- **語言一致**：description / Image_Prompt / Video_Prompt 必須使用與原文一致的語言（本案為英文）
+- **對話格式**：
+  - 真实对话：`角色名: 台词`（如 `Brad: How are you feeling?`）
+  - 旁白/独白：`角色名 (VO): 内容`（如 `Lily (VO): 11...12...13..`）
+  - 禁止使用单独的 VO 或 NARRATOR，必须标注是谁的旁白
 
 ### Image_Prompt (英文50-150詞)
 **公式**: Subject + Environment + Lighting + Camera + Style + Negative
