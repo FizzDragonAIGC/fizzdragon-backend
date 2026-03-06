@@ -48,10 +48,10 @@
   },
   "token_rules": {
     "look_token_definition": "LookToken = 角色名 + 服装名（字符串拼接）",
-    "prop_token_definition": "PropToken = 道具名（前缀@），用于标记关键道具/束缚/器具",
+    "prop_token_definition": "PropToken = 道具名（前缀@），**仅允许来自服化道/道具智能体识别或资产库**（不得随手把身体部位/针孔等写成@）",
     "syntax": "所有镜头 description/Image_Prompt/Video_Prompt 以 @Token 列表(空格分隔) 开头；可同时包含多个@LookToken与多个@PropToken",
     "examples": ["@Jason綠色西裝 @Lily囚服 @咖啡杯 男人正在和女人一起喝咖啡"],
-    "qc": "LookToken 若与 character+costume 拼接不一致则判错重写；关键道具应尽量带 @PropToken"
+    "qc": "LookToken 若与 character+costume 拼接不一致则判错重写；PropToken 必须在 episode_art_bible.allowed_prop_tokens 中，否则判错移除或重写"
   },
   "director_commands": {
     "art_director": {

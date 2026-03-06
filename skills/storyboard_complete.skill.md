@@ -113,6 +113,8 @@
 > - 每个镜头的 `description` / `Image_Prompt` / `Video_Prompt` 必须以 `@Token` 列表开头（后跟空格）。
 > - **人物 LookToken** = `角色名 + 服装名`（字符串拼接），例：`Jason綠色西裝`、`Lily囚服`。
 > - **道具 PropToken** = `道具名`（前缀@），用于标记关键道具/束缚/器具，例：`@鐵鏈`、`@鎖扣`、`@注射器`、`@針桶`、`@籠車`、`@小刀`。
+>   - ⚠️ PropToken 必须来自服化道/道具智能体识别或资产库（见 episode_art_bible.allowed_prop_tokens）。
+>   - 禁止把身体部位/针孔等写成 @。
 > - 多人/多道具镜头：`@Jason綠色西裝 @Lily囚服 @咖啡杯 男人正在和女人一起喝咖啡...`
 > - QC：LookToken 与 character+costume 不一致 → 判错重写；关键道具尽量带 PropToken。
 >
