@@ -46,11 +46,12 @@
     "forbidden": ["不允許同時左牆被鎖又去觸摸右牆"],
     "transitions": ["若要解鎖/移動，必須插入守衛解鎖特寫"]
   },
-  "look_token_rules": {
-    "definition": "LookToken = 角色名 + 服装名（字符串拼接）",
-    "syntax": "所有镜头 description/Image_Prompt/Video_Prompt 以 @LookToken(空格) 开头；多人镜头可多个 @LookToken 并列",
-    "examples": ["@Jason綠色西裝 @Lily囚服 男人正在和女人一起喝咖啡"],
-    "qc": "若 @token 与 character+costume 拼接不一致则判错重写"
+  "token_rules": {
+    "look_token_definition": "LookToken = 角色名 + 服装名（字符串拼接）",
+    "prop_token_definition": "PropToken = 道具名（前缀@），用于标记关键道具/束缚/器具",
+    "syntax": "所有镜头 description/Image_Prompt/Video_Prompt 以 @Token 列表(空格分隔) 开头；可同时包含多个@LookToken与多个@PropToken",
+    "examples": ["@Jason綠色西裝 @Lily囚服 @咖啡杯 男人正在和女人一起喝咖啡"],
+    "qc": "LookToken 若与 character+costume 拼接不一致则判错重写；关键道具应尽量带 @PropToken"
   },
   "director_commands": {
     "art_director": {

@@ -9,12 +9,15 @@
 
 0) **角色×服裝 LookToken 命名（跨系统协议）【新增】**
 - LookToken = `角色名 + 服装名`（字符串拼接），例如：`Jason綠色西裝`、`Lily囚服`。
-- 多人镜头：允许多个 LookToken 并列。
-- 下游系统解析：从文本开头抓取连续的 `@LookToken` 列表。
+- **PropToken（道具Token）**：用 `@道具名` 标记镜头中关键道具/束缚/器具，例如：`@鐵鏈`、`@鎖扣`、`@注射器`、`@針桶`、`@籠車`、`@小刀`。
+- 多人镜头：允许多个 LookToken 并列；同理允许多个 PropToken 并列。
+- 下游系统解析：从文本开头抓取连续的 `@Token` 列表（既包括人物LookToken，也包括道具PropToken）。
 
 **强制输出规则（每个镜头都要）**：
-- `description` / `Image_Prompt` / `Video_Prompt` 必须以 `@LookToken` 开头，后跟空格，再写正文。
-- 多人镜头：`@Jason綠色西裝 @Lily囚服 男人正在和女人一起喝咖啡...`
+- `description` / `Image_Prompt` / `Video_Prompt` 必须以 `@Token` 列表开头（后跟空格），再写正文。
+  - 人物：`@角色名服装名`（LookToken）
+  - 道具：`@道具名`（PropToken）
+- 多人/多道具镜头示例：`@Jason綠色西裝 @Lily囚服 @咖啡杯 男人正在和女人一起喝咖啡...`
 - token 之间以空格分隔；token 后至少一个空格再进入正文。
 
 1) **核心場景錨點（Scene Anchors）**
