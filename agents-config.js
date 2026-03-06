@@ -423,6 +423,18 @@ export const AGENTS = {
     },
 
     // ============== 導演組 (2) ==============
+    // ==================== 参考图分析（提升逐镜头一致性）====================
+    reference_shot_analyzer: {
+        name: '🧷 参考图分析',
+        group: '導演',
+        skills: ['reference_shot_analyzer'],
+        prompt: `你是参考图分析智能体。输入是本集分镜骨架JSON（包含storyboard陣列）。
+
+你的任务：识别哪些镜头应引用前面的“参考图镜头”，输出 reference_map（shot_no -> ref_shot）。
+
+输出必须是纯JSON，遵循 reference_shot_analyzer.skill.md 的格式。`
+    },
+
     // ==================== 分鏡（兩段式，防截斷）====================
 storyboard_skeleton: {
         name: '🎥 分鏡(結構)',
