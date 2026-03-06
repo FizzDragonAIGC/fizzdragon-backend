@@ -109,6 +109,12 @@
 >
 > 最終每個鏡頭必須把三者**強制注入**到 `description + Image_Prompt + Video_Prompt`，而不是只存在於導演筆記。
 >
+> ✅ 跨系统协议（LookToken）：
+> - 每个镜头的 `description` / `Image_Prompt` / `Video_Prompt` 必须以 `@LookToken` 开头（后跟空格）。
+> - LookToken = `角色名 + 服装名`（字符串拼接），例：`Jason綠色西裝`、`Lily囚服`。
+> - 多人镜头：`@Jason綠色西裝 @Lily囚服 男人正在和女人一起喝咖啡...`
+> - QC：@token 与 character+costume 不一致 → 判错重写。
+>
 > 對接 skills：
 > - `chief_director_episode.skill.md`
 > - `episode_art_bible.skill.md`

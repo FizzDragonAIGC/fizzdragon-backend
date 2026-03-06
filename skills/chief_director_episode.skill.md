@@ -46,6 +46,12 @@
     "forbidden": ["不允許同時左牆被鎖又去觸摸右牆"],
     "transitions": ["若要解鎖/移動，必須插入守衛解鎖特寫"]
   },
+  "look_token_rules": {
+    "definition": "LookToken = 角色名 + 服装名（字符串拼接）",
+    "syntax": "所有镜头 description/Image_Prompt/Video_Prompt 以 @LookToken(空格) 开头；多人镜头可多个 @LookToken 并列",
+    "examples": ["@Jason綠色西裝 @Lily囚服 男人正在和女人一起喝咖啡"],
+    "qc": "若 @token 与 character+costume 拼接不一致则判错重写"
+  },
   "director_commands": {
     "art_director": {
       "deliverables": ["episode_art_bible"],
