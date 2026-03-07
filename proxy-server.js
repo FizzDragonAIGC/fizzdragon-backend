@@ -142,6 +142,7 @@ function needsJsonOutput(agentId) {
   const naturalLanguageAgents = [
     'screenwriter',  // 編劇 - 輸出劇本
     'episode_mapping_pack', // 分集映射表CSV - 自然語言/CSV
+    'story_breakdown_pack', // 劇情拆解包（80集映射）- CSV
     'script',        // 劇本
     'dialogue',      // 對話
     'acting',        // 演技指導
@@ -1133,6 +1134,9 @@ app.post('/api/agent/:agentId', async (req, res) => {
   const { content, context, novel, title, userInput, useReasoner, provider: requestedProvider } = req.body;
   const actualContent = content || novel || userInput || "";
   const options = { useReasoner: useReasoner === true };
+
+  // Screenwriter mode (default can be set via env)
+  const screenwriterMode = (context?.screenwriterMode || process.env.SCREENWRITER_MODE_DEFAULT || 'legacy').trim();
   
   // 🆕 支持前端指定provider（临时切换）
   const originalProvider = currentProvider;
@@ -1217,6 +1221,100 @@ ${instruction || ''}
 内容：
 ${truncatedContent}`;
 
+    // ============ screenwriter (shootable_90s_pro) ============
+    } else if (agentId === 'screenwriter' && screenwriterMode === 'shootable_90s_pro') {
+      // Require episode mapping row to prevent plot drift
+      const mappingRow = context?.episodeMappingRow || context?.episode_mapping_row || req.body.episodeMappingRow;
+      if (!mappingRow) {
+        return res.status(400).json({
+          error: 'screenwriter_mode_requires_mapping',
+          message: 'screenwriterMode=shootable_90s_pro requires context.episodeMappingRow (one episode mapping row with source_range + beats).'
+        });
+      }
+
+      userMessage = `IMPORTANT: You are writing a SHOOTABLE shortdrama screenplay (English-only).\n\n` +
+`MODE: shootable_90s_pro\n` +
+`HARD TEMPLATE: Output exactly 6 time blocks with headers:\n` +
+`0:00-0:15\n0:15-0:45\n0:45-1:05\n1:05-1:25\n1:25-1:40\n1:40-1:45\n\n` +
+`For EACH time block you MUST include:\n- at least 2 lines starting with [Visual]\n- at least 1 line starting with [SFX/Ambience]\n- at least 1 externalized beat (action or dialogue). Dialogue format: NAME: line\n\n` +
+`VO RULE: Max 2 VO lines total for the whole episode. VO cannot explain lore/worldbuilding.\n` +
+`NO AFTER NOTES: No tables/checklists/writer notes.\n\n` +
+`EPISODE MAPPING ROW (authoritative, do not deviate):\n${typeof mappingRow === 'string' ? mappingRow : JSON.stringify(mappingRow)}\n\n` +
+`STORY CONTENT (source excerpt/range referenced by mapping):\n${truncatedContent}`;
+
+    // ============ story_breakdown_pack ============
+    } else if (agentId === 'story_breakdown_pack') {
+      // Build a deterministic 80-episode source_range index from the provided text
+      const buildSourceRanges = (text, target=80) => {
+        const lines = String(text||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+        const headRe = /^\s*(Chapter\s+\d+\s*\|.*|CHAPTER\s+\d+\s*\|.*)\s*$/i;
+        const heads = [];
+        for (let i=0;i<lines.length;i++) {
+          if (headRe.test(lines[i])) heads.push({ idx:i, title: lines[i].trim() });
+        }
+        // fallback: if no chapter headings, evenly split by lines
+        const segments = [];
+        if (heads.length === 0) {
+          const per = Math.max(1, Math.floor(lines.length/target));
+          for (let e=0;e<target;e++) {
+            const start = e*per;
+            const end = (e===target-1) ? (lines.length-1) : Math.min(lines.length-1, (e+1)*per-1);
+            segments.push({ startLine:start+1, endLine:end+1, title:`Segment ${e+1}` });
+          }
+          return segments;
+        }
+        // build chapter segments
+        for (let h=0;h<heads.length;h++) {
+          const start = heads[h].idx;
+          const end = (h===heads.length-1) ? (lines.length-1) : (heads[h+1].idx-1);
+          segments.push({ startLine:start+1, endLine:end+1, title: heads[h].title });
+        }
+        // If chapters > target, merge adjacent chapters
+        while (segments.length > target) {
+          // merge the shortest with neighbor
+          let minI = 0;
+          let minLen = Infinity;
+          for (let i=0;i<segments.length;i++) {
+            const len = segments[i].endLine - segments[i].startLine;
+            if (len < minLen) { minLen=len; minI=i; }
+          }
+          const i = minI;
+          const j = (i===0) ? 1 : i-1;
+          const a = segments[Math.min(i,j)];
+          const b = segments[Math.max(i,j)];
+          const merged = {
+            startLine: Math.min(a.startLine,b.startLine),
+            endLine: Math.max(a.endLine,b.endLine),
+            title: (a.title + ' + ' + b.title).slice(0,160)
+          };
+          segments.splice(Math.max(i,j),1);
+          segments.splice(Math.min(i,j),1,merged);
+        }
+        // If chapters < target, split longest segments
+        while (segments.length < target) {
+          let maxI = 0;
+          let maxLen = -1;
+          for (let i=0;i<segments.length;i++) {
+            const len = segments[i].endLine - segments[i].startLine;
+            if (len > maxLen) { maxLen=len; maxI=i; }
+          }
+          const seg = segments[maxI];
+          const mid = Math.floor((seg.startLine + seg.endLine) / 2);
+          const left = { startLine: seg.startLine, endLine: mid, title: seg.title + ' (A)' };
+          const right = { startLine: mid+1, endLine: seg.endLine, title: seg.title + ' (B)' };
+          segments.splice(maxI,1,left,right);
+        }
+        return segments;
+      };
+
+      const target = 80;
+      const segs = buildSourceRanges(truncatedContent, target);
+      const indexLines = segs.map((s,i)=>{
+        const ep = 'E' + String(i+1).padStart(3,'0');
+        return `${ep},${s.startLine}-${s.endLine},${s.title.replace(/,/g,' ')}`;
+      }).join('\n');
+      userMessage = `SOURCE RANGE INDEX (ep_id,source_range,segment_title)\n${indexLines}\n\nSTORY CONTENT:\n${truncatedContent}`;
+
     // ============ default ============
     } else {
       userMessage = context 
@@ -1278,6 +1376,25 @@ ${truncatedContent}`;
     // 自然语言输出：做一次文本清理，避免乱码/RTF控制码污染
     if (!needsJsonOutput(agentId)) {
       finalResult = sanitizePlainText(finalResult);
+
+      // QC gate for shootable_90s_pro
+      if (agentId === 'screenwriter' && screenwriterMode === 'shootable_90s_pro') {
+        const mustHeaders = ['0:00-0:15','0:15-0:45','0:45-1:05','1:05-1:25','1:25-1:40','1:40-1:45'];
+        const missing = mustHeaders.filter(h => !finalResult.includes(h));
+        const visualCount = (finalResult.match(/^\[Visual\]/gm) || []).length;
+        const sfxCount = (finalResult.match(/^\[SFX\/Ambience\]/gm) || []).length;
+        const voCount = (finalResult.match(/\b\(VO\)|^\[VO\]|\bVO\b:/gmi) || []).length;
+        if (missing.length || visualCount < 12 || sfxCount < 6 || voCount > 4) {
+          return res.status(500).json({
+            error: 'screenwriter_qc_failed',
+            agent: agentId,
+            screenwriterMode,
+            qc: { missingHeaders: missing, visualCount, sfxCount, voCount },
+            message: 'Screenwriter output failed shootable_90s_pro QC gate. Please retry (auto-retry will be added in next iteration).',
+            raw: String(finalResult).slice(0, 8000)
+          });
+        }
+      }
     }
 
     // 🆕 恢复原provider

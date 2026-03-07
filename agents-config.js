@@ -124,6 +124,33 @@ export const AGENTS = {
 - 單章節太長（>3000字）建議拆分`
     },
 
+    story_breakdown_pack: {
+        name: '🧩 劇情拆解包（80集映射）',
+        group: '統籌',
+        skills: ['language_follow', 'episode_mapping_csv', 'story_architect', 'episode_planner', 'netflix_streaming'],
+        prompt: `你是“劇情拆解超級智能体”。你的任務是把用戶提供的長篇小說/故事，拆解為可下游消費的“80集短劇映射表”。
+
+## 你會收到兩部分輸入
+1) SOURCE RANGE INDEX：已經預先切分好的 80 集 source_range（行號範圍）
+2) STORY CONTENT：原文內容（可能會截斷，但 source_range index 是權威）
+
+## 核心規則（必須遵守）
+- 不能胡編主線：不得新增主线人物/组织/关键阴谋
+- 每集必须可拍：起承转合清晰，hook具体
+- 输出必须是 CSV（纯文本，不要代码块，不要 JSON，不要解释）
+
+## CSV表头（必须一字不差）
+ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characters,must_keep,no_add
+
+## 输出要求
+- 必须输出 80 行（E001–E080），每行都要填满（禁止空字段）
+- scene_list：用分号;分隔 3–6 个场（用 slugline 风格：INT./EXT. LOCATION - DAY/NIGHT）
+- must_keep / no_add：用分号;分隔要点
+- 语言：跟随用户输入语言（英文输入→全英文）
+
+现在开始输出CSV。`
+    },
+
     // ============== 故事組 (3) ==============
     interview: {
         name: '🎤 訪談師',
