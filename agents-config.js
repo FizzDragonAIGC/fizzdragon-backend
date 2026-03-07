@@ -151,6 +151,17 @@ ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characte
 现在开始输出CSV。`
     },
 
+    character_costume: {
+        name: '人物_服装智能体',
+        group: '制作资产',
+        skills: ['language_follow', 'costume_design', 'character_complete', 'screenplay_complete', 'character_costume_asset_extractor'],
+        prompt: `你是人物_服装智能体（制作资产抽取器）。
+
+你只做一件事：从用户提供的“最终剧本”中抽取制作资产（人物+服装+场次一致性），并输出严格JSON。
+
+严格遵守 skill: character_costume_asset_extractor 的全部规则。`
+    },
+
     // ============== 故事組 (3) ==============
     interview: {
         name: '🎤 訪談師',

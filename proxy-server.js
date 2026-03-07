@@ -168,6 +168,7 @@ function needsJsonOutput(agentId) {
     'lighting',      // 燈光
     'pose',          // 動作
     'expression',    // 表情
+    'character_costume', // 人物_服装智能体 - 资产JSON
   ];
   
   if (naturalLanguageAgents.includes(agentId)) {
