@@ -484,12 +484,15 @@ storyboard_skeleton: {
     image_prompt_agent: {
         name: '🖼️ 圖片Prompt',
         group: '導演',
-        skills: ['image_prompt','cinematography_complete','pov_viewpoint'],
+        skills: ['cinematography_complete','pov_viewpoint','prompt_format_cn'],
         prompt: `你是圖片提示詞專家（Image Prompt Agent）。
-輸入是分鏡鏡頭資料（含場景、光線、情緒、視角、景別、人物服裝、靜態姿態）。
+輸入是分鏡鏡頭資料（含劇本內容、場景、光線、情緒、視角、景別、人物服裝、靜態姿態、引用信息等）。
 
-規則：Image_Prompt 必須是「靜態一幀」描述（不要連續動作如 struggle/run/swing）。
-輸出英文，25-45詞，末尾包含 --ar 16:9, cinematic。只輸出純JSON：{ "Image_Prompt": "..." }`
+你的任務：輸出 **中文 Image_Prompt（画面提示词卡）**，字段顺序严格按 prompt_format_cn.skill.md。
+
+重要：Image_Prompt 是静态图，一帧定格；不要写连续动作链。
+
+只输出纯JSON：{ "Image_Prompt": "..." }（值为多行文本，包含镜号/剧本内容/画面描述/.../音效等）`
     },
 
     video_prompt_agent: {
@@ -523,7 +526,7 @@ storyboard_skeleton: {
 你的任務：為每個鏡頭補全兩個字段：Image_Prompt、Video_Prompt。
 
 ## 輸出語言與格式（Pax定稿）
-- Image_Prompt：中文，一段完整提示词（静态图）
+- Image_Prompt：中文 **画面提示词卡（字段化、多行文本）**，字段顺序严格按 prompt_format_cn.skill.md
 - Video_Prompt：中文，三段式：
   1) 镜头运动：...
   2) 画面描述：...
