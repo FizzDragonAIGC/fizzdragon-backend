@@ -507,69 +507,61 @@ storyboard_skeleton: {
         name: '🧩 分鏡(Prompt補全)',
         group: '導演',
         skills: [
-            // ✅ 用你們培訓好的分鏡完整方法論（含畫面/動作/表演/光影/Prompt公式）
+            // ✅ 分鏡完整方法論（含畫面/動作/表演/光影）
             'storyboard_complete',
-            // ✅ 演技/眼神=演技（以可拍行為+節拍為核心）
+            // ✅ 演技：可拍行為+節拍
             'acting_complete',
             // ✅ 視角欄位
             'pov_viewpoint',
-            // ✅ Prompt專用規範（補足鏡頭語言/一致性）
-            'image_prompt',
-            'video_prompt',
-            // ✅ 鏡頭語言/光影（補全時更穩）
-            'cinematography_complete'
+            // ✅ 鏡頭語言/光影
+            'cinematography_complete',
+            // ✅ Pax版中文提示词格式
+            'prompt_format_cn'
         ],
         prompt: `你是AI影像提示詞專家。輸入是上一段生成的分鏡骨架JSON（包含storyboard陣列）。
 
 你的任務：為每個鏡頭補全兩個字段：Image_Prompt、Video_Prompt。
 
-## 靜態/動態分工（重要）
-- **Image_Prompt = 靜態一幀**：描述畫面主體、姿態（sitting/leaning）、空間關係、光線材質、構圖焦點；避免寫「正在掙扎/奔跑/揮舞」這種連續動作。
-- **Video_Prompt = 動態鏡頭**：鏡頭運動 + 連續動作（struggle/turn/step/pull）+ 節奏；把“動作主體”放在 Video。
+## 輸出語言與格式（Pax定稿）
+- Image_Prompt：中文，一段完整提示词（静态图）
+- Video_Prompt：中文，三段式：
+  1) 镜头运动：...
+  2) 画面描述：...
+  3) 声音：...
 
-## 重要（短劇爽劇/專業分鏡）
-- 單次最多處理20個鏡頭（輸入會是20個）
+## 关键规则
+- 单次最多处理20个镜头（输入会是20个）
+- 不要新增任何其他字段，不要修改原字段内容
 
-### 0) 畫風必須注入（關鍵！）
-- 你必須從輸入中讀取畫風提示（任一來源即可）：
-  - context.artStylePrompt / context.art_style_prompt
-  - 或 context.artStyle.final_suggestion / context.artstyle.final_suggestion
-  - 或骨架鏡頭內含 style / art_style / artStylePrompt
-- **若能取得畫風提示，必須把它放在 Image_Prompt 的最開頭**（作為風格前綴），再接鏡頭細節。
-- 若取得不到畫風提示，使用通用風格前綴："anime cinematic, hand-painted background, high detail"
+### 1) 静态/动态分工
+- Image_Prompt = 静态一帧：主体/姿态/空间关系/光线材质/构图焦点（避免连续动作用“正在奔跑/挥舞”等）
+- Video_Prompt = 动态镜头：镜头运动 + 连续动作 + 环境反应（雪/风/火光摇曳等）
 
-### 1) 視角/鏡頭語言必須明確
-- **必須補足「視角/鏡頭語言」**：在prompt中明確包含 POV/angle（如 first-person POV / over-the-shoulder / low angle / high angle / eye-level）
+### 2) 声音默认策略（减少旁白）
+- 默认：无人声、无对白、无背景音乐（VO=0）
+- 若必须写环境音，只能自然环境音（风雪/火焰/布料/脚步等），不得出现配乐
 
-### 2) 必須更細節
-- **必須更細節**：人物外觀/情緒、服裝要點、場景材質與道具、光線質感、構圖焦點
-- ⚠️ 不要為了“湊欄位”硬塞詞（例如眼神/微表情/音樂/旁白）。這些細節應該來自你已載入的專業skills（storyboard_complete / cinematography_complete / music_complete / voiceover_complete / production_design / style_system_complete 等）的敘事動機。
+### 3) 避免硬冲突（必须自检）
+- 如果 dialogue 为「- / 无」，Video_Prompt 不得写“正在说话/清晰说话”。
+  - 允许写：嘴唇开合但发不出声 / 无声呢喃 / 只有口型变化
 
-### Image_Prompt 規格
-- 必須英文，**25-45詞**（比以前更詳細）
-- 必須包含：shot type（close-up/medium/wide）、POV/angle、lens（如 35mm/50mm）、lighting（soft/hard/rim/neon 等）、key props/texture、mood
-- 末尾必須包含："--ar 16:9, cinematic"
+### 4) 细节要求（像你在写“图像/视频提示词”，不是写表格字段）
+- Image_Prompt 必须包含：景别、拍摄角度、镜头焦距、构图、氛围、关键环境要素
+- Video_Prompt 的“镜头运动”必须先写清楚（固定/推/拉/横移/跟拍/摇/俯仰），并可写焦点锁定
 
-### Video_Prompt 規格
-- 必須英文，**18-30詞**
-- 必須包含：camera movement（dolly/pan/tilt/handheld/steadicam 等）+ POV/angle + 節奏（fast cuts / punchy pacing 等）
-- 必須包含 "cinematic"
-
-- 不要新增任何其他字段，不要修改原字段內容
-
-## 輸出格式（純JSON）
+## 输出格式（纯JSON）
 {
   "storyboard": [
     {
       "scene_no": 1,
       "shot_no": 1,
       "Image_Prompt": "...",
-      "Video_Prompt": "..."
+      "Video_Prompt": "镜头运动：...\n画面描述：...\n声音：..."
     }
   ]
 }
 
-只輸出JSON，無任何解釋。`
+只输出JSON，无任何解释。`
     },
 
     // ==================== 分鏡（舊入口，保留兼容）====================
