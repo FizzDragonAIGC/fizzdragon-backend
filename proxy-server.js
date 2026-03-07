@@ -1233,6 +1233,7 @@ ${truncatedContent}`;
       }
 
       userMessage = `IMPORTANT: You are writing a SHOOTABLE shortdrama screenplay (English-only).\n\n` +
+`CANON: Arian / TO-56 is FEMALE. Always refer to her as she/her. Never misgender her.\n\n` +
 `MODE: shootable_90s_pro\n` +
 `HARD TEMPLATE: Output exactly 6 time blocks with headers:\n` +
 `0:00-0:15\n0:15-0:45\n0:45-1:05\n1:05-1:25\n1:25-1:40\n1:40-1:45\n\n` +
