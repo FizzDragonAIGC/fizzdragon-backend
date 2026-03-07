@@ -1362,14 +1362,36 @@ EXPRESSION: [mood]. COSTUME: [outfit]. SILHOUETTE: [shape].
 2. 每集允許700-1200字浮動
 3. 每集結尾添加 outro_hook（1-2句增強懸念）
 4. 如果原劇本>20000字，分批處理（每批10集）`
+    },
+
+    // ============== 🆕 全链路打包組 (3) ==============
+    concept_pack: {
+        name: '🧭 概念包（导演指示）',
+        group: '統籌',
+        skills: ['language_follow', 'concept_pack'],
+        prompt: `你负责为“单集/单章”生成概念包（导演指示）。\n\n硬规则：\n- 输出必须是 JSON（不夹杂解释文本）\n- 输出语言必须与输入语言一致（不翻译、不混写）\n- 不要求全书上下文，缺失信息用最小假设并写入 special_instructions`
+    },
+
+    script_pack: {
+        name: '📝 剧本包（含原文）',
+        group: '故事',
+        skills: ['language_follow', 'script_pack'],
+        prompt: `你负责生成“单集剧本包”。\n\n硬规则：\n- 包内必须包含该集对应的原文摘录 source_excerpt（用于溯源）\n- 输出必须是 JSON（不夹杂解释文本）\n- 输出语言必须与输入语言一致（不翻译、不混写）\n- VO 策略：仅保留输入剧本明确标注的 VO，不额外添加` 
+    },
+
+    storyboard_episode_pack: {
+        name: '🎬 分镜集数包（含该集剧本）',
+        group: '導演',
+        skills: ['language_follow', 'storyboard_episode_pack'],
+        prompt: `你负责生成“分镜集数包（中观规划）”。\n\n硬规则：\n- 包内必须包含该集剧本（来自 script_pack，允许内嵌 data）\n- 输出必须是 JSON（不夹杂解释文本）\n- 输出语言必须与输入语言一致（不翻译、不混写）\n- 不要输出逐镜头分镜；只做场次/角色/服装/灯光色彩/道具/特效等统一规划`
     }
 };
 
 // 導出分組信息
 export const AGENT_GROUPS = {
-    '統籌': ['director', 'concept', 'script_parser', 'shortdrama_director', 'format_adapter'],
-    '故事': ['interview', 'screenwriter', 'narrative'],
-    '導演': ['storyboard', 'cinematography'],
+    '統籌': ['director', 'concept', 'concept_pack', 'script_parser', 'shortdrama_director', 'format_adapter'],
+    '故事': ['interview', 'screenwriter', 'narrative', 'script_pack'],
+    '導演': ['storyboard', 'cinematography', 'storyboard_episode_pack'],
     '美術': ['artstyle', 'character', 'production_design'],
     'AI輸出': ['prompt'],
     '專項': ['vfx', 'music', 'era'],
