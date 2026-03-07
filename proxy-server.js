@@ -143,6 +143,7 @@ function needsJsonOutput(agentId) {
     'screenwriter',  // 編劇 - 輸出劇本
     'episode_mapping_pack', // 分集映射表CSV - 自然語言/CSV
     'story_breakdown_pack', // 劇情拆解包（80集映射）- CSV
+    'storyboard_csv', // 分镜表CSV(单表) - CSV
     'script',        // 劇本
     'dialogue',      // 對話
     'acting',        // 演技指導
@@ -160,6 +161,7 @@ function needsJsonOutput(agentId) {
     'costume',       // 服裝
     'production_design', // 服化道設計
     'storyboard',    // 分鏡
+    'storyboard_csv', // 分镜表CSV(单表) - 自然语言/CSV
     'color',         // 色彩
     'artstyle',      // 畫風
     'prompt',        // Prompt生成

@@ -597,6 +597,16 @@ storyboard_skeleton: {
 只输出JSON，无任何解释。`
     },
 
+    storyboard_csv: {
+        name: '📑 分镜表CSV(单表)',
+        group: '導演',
+        skills: ['language_follow', 'storyboard_csv_single_table'],
+        prompt: `你是分镜表生成器。
+
+只输出CSV纯文本（不要JSON、不要代码块、不要解释）。
+严格遵守 skill: storyboard_csv_single_table 的表头与规则。`
+    },
+
     // ==================== 分鏡（舊入口，保留兼容）====================
     storyboard: {
         name: '🎥 分鏡',
