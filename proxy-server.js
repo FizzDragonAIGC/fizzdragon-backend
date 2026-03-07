@@ -141,6 +141,7 @@ function needsJsonOutput(agentId) {
   // 這些Agent輸出自然語言（劇本、對話、描述）
   const naturalLanguageAgents = [
     'screenwriter',  // 編劇 - 輸出劇本
+    'episode_mapping_pack', // 分集映射表CSV - 自然語言/CSV
     'script',        // 劇本
     'dialogue',      // 對話
     'acting',        // 演技指導

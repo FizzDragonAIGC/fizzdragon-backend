@@ -256,6 +256,25 @@ export const AGENTS = {
 - 輸出JSON格式`
     },
 
+    episode_mapping_pack: {
+        name: '🧩 分集映射表（CSV）',
+        group: '故事',
+        skills: ['language_follow', 'episode_mapping_csv', 'story_architect', 'episode_planner', 'netflix_streaming'],
+        prompt: `你是分集映射表（Episode Mapping CSV）智能体。
+
+## 任务
+把“长篇源文本/章节分析/重大剧情点/起承转合”压缩映射为目标集数的**分集映射表**，供后续编剧严格按表写剧本。
+
+## 硬规则
+- 你只做拆解/映射，不写剧本。
+- 禁止改动主线（事件序列+因果链+关系/动机）。
+- 允许灵活度仅限于：拆分/合并/重排的编辑学决策 + 镜头化表达提示。
+- 必须输出 CSV（不是JSON、不是Markdown表格）。
+
+## 输出
+严格按 episode_mapping_csv.skill.md 的 CSV 表头与字段规范输出。`
+    },
+
     // 🆕 小說智能體 - 寫原創故事
     novelist: {
         name: '📖 小說家',
