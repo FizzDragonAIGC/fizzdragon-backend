@@ -1452,6 +1452,22 @@ ${truncatedContent}`;
           });
         }
       }
+
+      // QC gate for storyboard_csv: header must match expected CSV columns
+      if (agentId === 'storyboard_csv') {
+        const expectedHeader = '镜号,时间码,场景,角色,服装,道具,景别,角度,焦距,运动,构图,画面描述,动作,神态,台词,旁白,光线,音效,叙事功能,Image_Prompt,Video_Prompt';
+        const firstLine = String(finalResult || '').split('\n')[0].replace(/^\ufeff/, '').trim();
+        if (firstLine !== expectedHeader) {
+          return res.status(500).json({
+            error: 'storyboard_csv_header_mismatch',
+            agent: agentId,
+            message: 'Storyboard CSV header mismatch. Please retry; model must output the exact required header (no color/music columns).',
+            expectedHeader,
+            gotHeader: firstLine,
+            raw: String(finalResult).slice(0, 2000)
+          });
+        }
+      }
     }
 
     // 🆕 恢复原provider
