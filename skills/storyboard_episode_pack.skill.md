@@ -9,8 +9,11 @@
 - 概念包（concept_pack）
 - 该集完整剧本（episode_script，来自 script_pack）
 
-## 输出语言
+## 输出语言（硬规则）
 必须遵守 **language_follow**：输出语言 = 输入语言。
+
+- 如果输入是 **English**：JSON 的 **所有字符串值** 必须是英文（禁止中文/混写）。
+- JSON 的 key 请使用英文 snake_case（如 episode_title / scene_plan / continuity_redlines）。
 
 ## 输出格式（JSON，严禁夹杂解释文本）
 ```json
