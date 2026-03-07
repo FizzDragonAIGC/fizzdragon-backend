@@ -79,6 +79,28 @@ function sanitizeForJson(text) {
     .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, ''); // 移除孤立的低代理
 }
 
+// 清理常见乱码/智能标点，确保可稳定导出为 TXT/Word
+function sanitizePlainText(text) {
+  if (!text) return '';
+  return String(text)
+    // Common mojibake from broken UTF-8
+    .replace(/â€™/g, "'")
+    .replace(/â€œ/g, '"')
+    .replace(/â€\x9d/g, '"')
+    .replace(/â€\x9c/g, '"')
+    .replace(/â€”/g, '--')
+    .replace(/â€“/g, '-')
+    .replace(/â€¦/g, '...')
+    .replace(/Â/g, '')
+    // Smart punctuation normalization
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[—]/g, '--')
+    // Accidental RTF header leakage
+    .replace(/\{?\\rtf1[^\n]*\n?/gi, '')
+    .trim();
+}
+
 // 加载单个skill文件
 function loadSkill(skillId) {
   if (skillCache.has(skillId)) {
@@ -827,7 +849,9 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
   
   // 清理内容以确保JSON兼容性
   const cleanSystem = sanitizeForJson(systemPrompt);
-  const cleanUser = sanitizeForJson(userMessage + (needsJsonOutput(agentId) ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字，不要输出思考过程。只输出{开头}结尾的JSON。**' : '\n\n**用自然流暢的中文輸出，不要輸出JSON或代碼格式。**'));
+  const cleanUser = sanitizeForJson(userMessage + (needsJsonOutput(agentId)
+    ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字，不要输出思考过程。只输出{开头}结尾的JSON。**'
+    : '\n\n**重要：只输出最终正文（自然语言），不要JSON，不要代码块，不要解释/思考过程；输出语言必须跟随输入语言。**'));
   
   // 🔧 添加超时控制（Render免费版30秒限制，设25秒以便返回错误）
   const controller = new AbortController();
@@ -909,7 +933,9 @@ async function callAnthropicAPI(systemPrompt, userMessage, agentId = '') {
       max_tokens: maxTokens,
       system: systemPrompt,
       messages: [
-        { role: 'user', content: userMessage + (needsJsonOutput(agentId) ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字，不要输出思考过程。只输出{开头}结尾的JSON。**' : '\n\n**用自然流暢的中文輸出，不要輸出JSON或代碼格式。**') }
+        { role: 'user', content: userMessage + (needsJsonOutput(agentId)
+          ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字，不要输出思考过程。只输出{开头}结尾的JSON。**'
+          : '\n\n**重要：只输出最终正文（自然语言），不要JSON，不要代码块，不要解释/思考过程；输出语言必须跟随输入语言。**') }
       ]
     });
     
@@ -955,7 +981,9 @@ async function callGeminiAPI(systemPrompt, userMessage, agentId = '') {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [
-            { role: 'user', parts: [{ text: systemPrompt + '\n\n' + userMessage + (needsJsonOutput(agentId) ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字，不要输出思考过程。只输出{开头}结尾的JSON。**' : '\n\n**用自然流暢的中文輸出，不要輸出JSON或代碼格式。**') }] }
+            { role: 'user', parts: [{ text: systemPrompt + '\n\n' + userMessage + (needsJsonOutput(agentId)
+              ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字，不要输出思考过程。只输出{开头}结尾的JSON。**'
+              : '\n\n**重要：只输出最终正文（自然语言），不要JSON，不要代码块，不要解释/思考过程；输出语言必须跟随输入语言。**') }] }
           ],
           generationConfig: {
             maxOutputTokens: agentId === 'storyboard' ? 16000 : (needsLongOutput ? 8000 : 4096),
@@ -1246,6 +1274,11 @@ ${truncatedContent}`;
       }
     }
     
+    // 自然语言输出：做一次文本清理，避免乱码/RTF控制码污染
+    if (!needsJsonOutput(agentId)) {
+      finalResult = sanitizePlainText(finalResult);
+    }
+
     // 🆕 恢复原provider
     if (requestedProvider) currentProvider = originalProvider;
     
@@ -1585,20 +1618,16 @@ ${nextChapterHint ? '\n- 結尾為下一章埋伏筆' : ''}
     const systemPrompt = `${agent.prompt}
 
 ---
-## 专业方法论参考（必须运用以下方法分析）：
+## 专业方法论参考（必须运用以下方法论）：
 ${skillsContent}
 ---
 
 **核心要求：**
 1. 必须深度阅读和理解用户提供的具体内容
-2. 运用上述方法论分析这个特定的故事/内容
-3. 所有问题/回答都必须针对这个具体内容，不能给通用模板
-4. 体现出你对角色、情节、主题的深度理解
+2. 运用上述方法论处理这个特定内容，不能给通用模板
+3. 必须遵守当前 Agent 的输出格式要求
 
-**输出格式要求：**
-- 直接输出JSON，不要解释
-- 保持简洁，每个字段不超过50字
-- 确保JSON完整闭合`;
+${needsJsonOutput(agentId) ? `**输出格式要求（JSON Agents）：**\n- 直接输出纯JSON，不要解释、不要markdown代码块\n- 确保JSON完整闭合` : `**输出格式要求（自然语言 Agents）：**\n- 只输出最终正文，不要解释/分析/思考过程\n- 不要输出JSON，不要输出markdown代码块`}`;
 
     // 限制内容长度（最重要！防止超时）
     const limit = runtimeConfig.contentLimit || 2000;
