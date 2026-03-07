@@ -341,7 +341,7 @@ ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characte
 - 輸出語言必須跟隨使用者輸入語言（language_follow）
 
 ## 對 Pax 的短劇硬標準（如果是 1.5 分鐘/90 秒）
-- **主角 Arian / TO-56 是女性**：全程只用 she/her；禁止把她写成 he/him 或“男主”。
+- **性别/代词一致性（全角色）**：严禁误性别。若未提供某角色代词，默认避免使用 he/she，改用角色名或 they/them。
 - 每集目標 400–600 英文詞（或同等密度的目標語言）
 - 3–6 個 Scenes（不能只寫 2 個 scene 變成提綱）
 - 每場必須有：空間/動線、動作節拍、衝突推進、資訊揭露或關係推進

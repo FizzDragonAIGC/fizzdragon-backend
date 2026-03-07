@@ -1225,6 +1225,7 @@ ${truncatedContent}`;
     } else if (agentId === 'screenwriter' && screenwriterMode === 'shootable_90s_pro') {
       // Require episode mapping row to prevent plot drift
       const mappingRow = context?.episodeMappingRow || context?.episode_mapping_row || req.body.episodeMappingRow;
+      const characterPronouns = context?.characterPronouns || context?.character_pronouns || req.body.characterPronouns;
       if (!mappingRow) {
         return res.status(400).json({
           error: 'screenwriter_mode_requires_mapping',
@@ -1233,7 +1234,10 @@ ${truncatedContent}`;
       }
 
       userMessage = `IMPORTANT: You are writing a SHOOTABLE shortdrama screenplay (English-only).\n\n` +
-`CANON: Arian / TO-56 is FEMALE. Always refer to her as she/her. Never misgender her.\n\n` +
+`PRONOUN CANON (must obey):\n` +
+`- If context.characterPronouns is provided, you MUST follow it strictly (never misgender any character).\n` +
+`- If pronouns for a character are NOT provided, avoid gendered pronouns (he/she). Use the character's name or they/them.\n` +
+`\n` +
 `MODE: shootable_90s_pro\n` +
 `HARD TEMPLATE: Output exactly 6 time blocks with headers:\n` +
 `0:00-0:15\n0:15-0:45\n0:45-1:05\n1:05-1:25\n1:25-1:40\n1:40-1:45\n\n` +
@@ -1241,6 +1245,7 @@ ${truncatedContent}`;
 `VO RULE: Max 2 VO lines total for the whole episode. VO cannot explain lore/worldbuilding.\n` +
 `NO AFTER NOTES: No tables/checklists/writer notes.\n\n` +
 `EPISODE MAPPING ROW (authoritative, do not deviate):\n${typeof mappingRow === 'string' ? mappingRow : JSON.stringify(mappingRow)}\n\n` +
+`CHARACTER PRONOUNS (JSON, authoritative; if absent, do NOT use he/she for that character):\n${characterPronouns ? JSON.stringify(characterPronouns) : '{ }'}\n\n` +
 `STORY CONTENT (source excerpt/range referenced by mapping):\n${truncatedContent}`;
 
     // ============ story_breakdown_pack ============
