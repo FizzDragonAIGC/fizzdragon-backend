@@ -857,7 +857,8 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
   
   // 🔧 添加超时控制（Render免费版30秒限制，设25秒以便返回错误）
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), useReasoner ? 120000 : 25000);
+  // character generation often needs more time; keep within Render limits
+  const timeoutId = setTimeout(() => controller.abort(), (useReasoner || agentId === 'character') ? 120000 : 25000);
   
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
