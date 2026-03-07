@@ -1378,6 +1378,53 @@ ${truncatedContent}`;
           message: '模型未按要求输出纯JSON（已拦截非JSON文本）。请重试。',
           raw: String(finalResult || '').slice(0, 8000)
         });
+      } else if (agentId === 'character_costume') {
+        // schema gate for character_costume asset extractor
+        try {
+          const data = JSON.parse(finalResult);
+          const requiredTop = [
+            'costume_library',
+            'character_library',
+            'character_costume_library',
+            'character_costume_episode_scene_library'
+          ];
+          const missingTop = requiredTop.filter(k => !Array.isArray(data?.[k]));
+
+          // required fields per table
+          const reqCostume = ['costume_id','name','category','components','materials_texture','condition_states','prompt_fullbody','prompt_portrait','continuity_notes'];
+          const reqChar = ['character_id','name','pronouns','role','base_look','image_prompt_portrait','image_prompt_turnaround'];
+          const reqLink = ['character_id','costume_id','is_default','usage_tags','fit_notes','props_bundle'];
+          const reqEpScene = ['episode_id','scene_id','slugline','character_id','costume_id','continuity_delta','must_match','notes'];
+
+          const checkRows = (rows, req) => {
+            for (let i=0;i<Math.min(rows.length, 20);i++) {
+              const r = rows[i] || {};
+              for (const f of req) {
+                if (!(f in r)) return f;
+              }
+            }
+            return null;
+          };
+
+          const missCostume = Array.isArray(data.costume_library) ? checkRows(data.costume_library, reqCostume) : 'costume_library';
+          const missChar = Array.isArray(data.character_library) ? checkRows(data.character_library, reqChar) : 'character_library';
+          const missLink = Array.isArray(data.character_costume_library) ? checkRows(data.character_costume_library, reqLink) : 'character_costume_library';
+          const missEpScene = Array.isArray(data.character_costume_episode_scene_library) ? checkRows(data.character_costume_episode_scene_library, reqEpScene) : 'character_costume_episode_scene_library';
+
+          const missing = { missingTop, missCostume, missChar, missLink, missEpScene };
+          const ok = missingTop.length===0 && !missCostume && !missChar && !missLink && !missEpScene;
+
+          if (!ok) {
+            finalResult = JSON.stringify({
+              error: 'character_costume_schema_failed',
+              agent: agentId,
+              message: '人物_服装智能体 输出未满足 schema（字段缺失或表结构不完整）。请重试。',
+              missing
+            });
+          }
+        } catch {
+          // ignore
+        }
       }
     }
     

@@ -18,15 +18,17 @@
 2) screenplay（最终剧本全文，包含每个 scene 的 scene_id + slugline）
 
 ## 输出（严格 JSON，不要代码块）
-返回一个 JSON 对象，必须包含 4 个数组：
+返回一个 JSON 对象，必须包含 4 个数组（key 必须一字不差）：
 
 1) costume_library
 2) character_library
 3) character_costume_library
 4) character_costume_episode_scene_library
 
+⚠️ 任何缺少字段/缺少 key/字段名不一致，都视为失败。不要输出精简版。
+
 ### 1) costume_library（服装SKU库）
-每个元素字段：
+每个元素字段（必须全部存在，不能省略）：
 - costume_id (string, unique)
 - name (string)
 - category (string)
@@ -38,7 +40,7 @@
 - continuity_notes (string)
 
 ### 2) character_library（人物库）
-每个元素字段：
+每个元素字段（必须全部存在，不能省略）：
 - character_id (string, unique)
 - name (string)
 - pronouns (string, must match characterPronouns if provided)
@@ -48,7 +50,7 @@
 - image_prompt_turnaround (string, English, full-body turnaround)
 
 ### 3) character_costume_library（人物-服装可用表）
-每个元素字段：
+每个元素字段（必须全部存在，不能省略）：
 - character_id
 - costume_id
 - is_default (boolean)
@@ -57,7 +59,7 @@
 - props_bundle (array of string)
 
 ### 4) character_costume_episode_scene_library（人物-服装-集数-场次一致性表）
-每个元素字段：
+每个元素字段（必须全部存在，不能省略）：
 - episode_id (string; E###)
 - scene_id (string; E###_S##)
 - slugline (string)

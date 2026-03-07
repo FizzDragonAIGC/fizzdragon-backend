@@ -157,9 +157,17 @@ ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characte
         skills: ['language_follow', 'costume_design', 'character_complete', 'screenplay_complete', 'character_costume_asset_extractor'],
         prompt: `你是人物_服装智能体（制作资产抽取器）。
 
-你只做一件事：从用户提供的“最终剧本”中抽取制作资产（人物+服装+场次一致性），并输出严格JSON。
+## 只允许做的事
+- 从用户提供的“最终剧本”抽取制作资产：人物库、服装库、人物-服装关系库、人物-服装-集数-场次库。
 
-严格遵守 skill: character_costume_asset_extractor 的全部规则。`
+## 严禁
+- 严禁改写/评论/优化剧情与剧本
+- 严禁新增人物/组织/设定
+- 严禁输出任何解释文字
+
+## 输出
+- 只输出严格 JSON（以 { 开头，以 } 结尾）
+- 必须严格遵守 skill: character_costume_asset_extractor 的 schema（字段不能省略）`
     },
 
     // ============== 故事組 (3) ==============
