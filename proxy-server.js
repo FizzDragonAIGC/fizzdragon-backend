@@ -1458,7 +1458,12 @@ ${truncatedContent}`;
         const expectedHeader = '镜号,时间码,场景,角色,服装,道具,景别,角度,焦距,运动,构图,画面描述,动作,神态,台词,旁白,光线,音效,叙事功能,Image_Prompt,Video_Prompt';
         const text = String(finalResult || '').replace(/^\ufeff/, '');
         const lines = text.split(/\r?\n/).filter(Boolean);
-        const firstLine = (lines[0] || '').trim();
+        let firstLine = (lines[0] || '').trim();
+        // allow quoted header ("镜号","时间码",...)
+        if (firstLine.startsWith('"') && firstLine.includes('","')) {
+          const cells = firstLine.split(',').map(s => s.trim().replace(/^"|"$/g, '').replace(/""/g,'"'));
+          firstLine = cells.join(',');
+        }
         if (firstLine !== expectedHeader) {
           return res.status(500).json({
             error: 'storyboard_csv_header_mismatch',
