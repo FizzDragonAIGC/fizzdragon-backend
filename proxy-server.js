@@ -1478,11 +1478,34 @@ ${truncatedContent}`;
           .filter(([c]) => !allowEmpty.has(c))
           .map(([, i]) => i);
 
-        // Basic CSV parse (comma-separated; prompts should not contain raw newlines)
+        // CSV parse with quotes (RFC4180-ish, single line)
+        function parseCsvLine(line) {
+          const out = [];
+          let cur = '';
+          let inQ = false;
+          for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (inQ) {
+              if (ch === '"') {
+                if (line[i + 1] === '"') { cur += '"'; i++; }
+                else { inQ = false; }
+              } else {
+                cur += ch;
+              }
+            } else {
+              if (ch === ',') { out.push(cur); cur = ''; }
+              else if (ch === '"') { inQ = true; }
+              else { cur += ch; }
+            }
+          }
+          out.push(cur);
+          return out;
+        }
+
         const bad = [];
         for (let li = 1; li < lines.length; li++) {
           const row = lines[li];
-          const cells = row.split(',');
+          const cells = parseCsvLine(row);
           if (cells.length !== cols.length) {
             bad.push({ line: li + 1, reason: 'col_count_mismatch', got: cells.length, expected: cols.length, row: row.slice(0, 300) });
             if (bad.length >= 5) break;
