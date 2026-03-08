@@ -1475,9 +1475,9 @@ ${truncatedContent}`;
           });
         }
 
-        // Required non-empty columns (台词/旁白允许空)
+        // Required non-empty columns (允许空：道具/旁白/音效/台词/叙事功能)
         const cols = expectedHeader.split(',');
-        const allowEmpty = new Set(['台词', '旁白']);
+        const allowEmpty = new Set(['道具','旁白','音效','台词','叙事功能']);
         const requiredIdx = cols
           .map((c, i) => [c, i])
           .filter(([c]) => !allowEmpty.has(c))
