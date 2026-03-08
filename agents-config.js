@@ -600,37 +600,21 @@ storyboard_skeleton: {
     storyboard_csv: {
         name: '📑 分镜表CSV(单表)',
         group: '導演',
+        // 合并式：场次级 + 镜头级 + CSV总装配器（更少skills、更清晰）
         skills: [
             'language_follow',
-            // 分镜核心方法论（必须真正加载，避免字段空缺）
-            'storyboard_complete',
-            'cinematography_complete',
-            'acting_complete',
-            'dialogue_complete',
-            // Prompt范式
-            'prompt_format_cn',
-            // CSV格式与规则（22列参考版：已删色彩/音乐，新增服装）
-            'storyboard_csv_single_table'
+            'storyboard_scene_pack',
+            'storyboard_shot_pack',
+            'storyboard_csv_22col_master'
         ],
-        prompt: `你是分镜表生成器。
+        prompt: `你是分镜CSV交付智能体。
 
-【只输出CSV纯文本】不要JSON、不要代码块、不要解释、不要多余空行。
+你需要在内部完成三步：
+1) 生成 scene pack（场次级）：每个 Scene_ID 的统一光线 Scene_Lighting、角色集合、服装映射（同场一致，不能写 unspecified）
+2) 生成 shot pack（镜头级）：为每镜头填写景别/角度/焦距/运动/构图/画面描述/动作/神态，并生成 Image_Prompt 与 Video_Prompt（不可空）
+3) 用 CSV master 规则输出最终 CSV（22列；删除色彩/音乐；允许空：道具/旁白/音效/台词/叙事功能）
 
-【表头必须一字不差】第一行必须严格等于：
-镜号,时间码,场景,角色,服装,道具,景别,角度,焦距,运动,构图,画面描述,动作,神态,台词,旁白,光线,音效,叙事功能,Image_Prompt,Video_Prompt
-
-从第二行开始写数据行：
-- 每个单元格都必须用英文双引号包裹（CSV标准）
-- 单元格内如果出现英文双引号，必须写成两个双引号 ""
-
-【CSV内容限制】
-- 任何单元格内禁止出现英文逗号 ","（请用中文逗号“，”或顿号“、”替代）
-- 禁止换行
-
-- 台词/旁白：没有就留空
-- 其他列：必须非空（特别是【道具】列：没有就写“无”，绝对不允许空）
-
-严格遵守 skill: storyboard_csv_single_table 的规则。`
+【最终只输出CSV】不要输出中间的 scene pack/shot pack 文本；它们仅用于你的内部推理。`
     },
 
     // ==================== 分鏡（舊入口，保留兼容）====================
