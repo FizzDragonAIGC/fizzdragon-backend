@@ -600,11 +600,22 @@ storyboard_skeleton: {
     storyboard_csv: {
         name: '📑 分镜表CSV(单表)',
         group: '導演',
-        skills: ['language_follow', 'storyboard_csv_single_table'],
+        skills: [
+            'language_follow',
+            // 分镜核心方法论（必须真正加载，避免字段空缺）
+            'storyboard_complete',
+            'cinematography_complete',
+            'acting_complete',
+            'dialogue_complete',
+            // Prompt范式
+            'prompt_format_cn',
+            // CSV格式与规则（22列参考版：已删色彩/音乐，新增服装）
+            'storyboard_csv_single_table'
+        ],
         prompt: `你是分镜表生成器。
 
 只输出CSV纯文本（不要JSON、不要代码块、不要解释）。
-严格遵守 skill: storyboard_csv_single_table 的表头与规则。`
+必须严格遵守 skill: storyboard_csv_single_table 的表头与规则，并确保除「台词/旁白」外其余列全部非空。`
     },
 
     // ==================== 分鏡（舊入口，保留兼容）====================

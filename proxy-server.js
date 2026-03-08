@@ -1453,10 +1453,12 @@ ${truncatedContent}`;
         }
       }
 
-      // QC gate for storyboard_csv: header must match expected CSV columns
+      // QC gate for storyboard_csv: header + non-empty required columns
       if (agentId === 'storyboard_csv') {
         const expectedHeader = '镜号,时间码,场景,角色,服装,道具,景别,角度,焦距,运动,构图,画面描述,动作,神态,台词,旁白,光线,音效,叙事功能,Image_Prompt,Video_Prompt';
-        const firstLine = String(finalResult || '').split('\n')[0].replace(/^\ufeff/, '').trim();
+        const text = String(finalResult || '').replace(/^\ufeff/, '');
+        const lines = text.split(/\r?\n/).filter(Boolean);
+        const firstLine = (lines[0] || '').trim();
         if (firstLine !== expectedHeader) {
           return res.status(500).json({
             error: 'storyboard_csv_header_mismatch',
@@ -1464,7 +1466,43 @@ ${truncatedContent}`;
             message: 'Storyboard CSV header mismatch. Please retry; model must output the exact required header (no color/music columns).',
             expectedHeader,
             gotHeader: firstLine,
-            raw: String(finalResult).slice(0, 2000)
+            raw: text.slice(0, 2000)
+          });
+        }
+
+        // Required non-empty columns (台词/旁白允许空)
+        const cols = expectedHeader.split(',');
+        const allowEmpty = new Set(['台词', '旁白']);
+        const requiredIdx = cols
+          .map((c, i) => [c, i])
+          .filter(([c]) => !allowEmpty.has(c))
+          .map(([, i]) => i);
+
+        // Basic CSV parse (comma-separated; prompts should not contain raw newlines)
+        const bad = [];
+        for (let li = 1; li < lines.length; li++) {
+          const row = lines[li];
+          const cells = row.split(',');
+          if (cells.length !== cols.length) {
+            bad.push({ line: li + 1, reason: 'col_count_mismatch', got: cells.length, expected: cols.length, row: row.slice(0, 300) });
+            if (bad.length >= 5) break;
+            continue;
+          }
+          for (const idx of requiredIdx) {
+            if (!String(cells[idx] || '').trim()) {
+              bad.push({ line: li + 1, reason: 'required_empty', col: cols[idx], row: row.slice(0, 300) });
+              break;
+            }
+          }
+          if (bad.length >= 5) break;
+        }
+        if (bad.length) {
+          return res.status(500).json({
+            error: 'storyboard_csv_qc_failed',
+            agent: agentId,
+            message: 'Storyboard CSV failed QC: required columns empty or CSV columns mismatch. Please retry.',
+            bad,
+            raw: text.slice(0, 2000)
           });
         }
       }
