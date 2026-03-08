@@ -628,7 +628,7 @@ storyboard_skeleton: {
 - 禁止换行
 
 - 台词/旁白：没有就留空
-- 其他列：必须非空
+- 其他列：必须非空（特别是【道具】列：没有就写“无”，绝对不允许空）
 
 严格遵守 skill: storyboard_csv_single_table 的规则。`
     },
