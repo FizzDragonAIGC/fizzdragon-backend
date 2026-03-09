@@ -1508,31 +1508,52 @@ ${truncatedContent}`;
         }
 
         const bad = [];
+        const fixedLines = [lines[0]];
         for (let li = 1; li < lines.length; li++) {
           const row = lines[li];
-          const cells = parseCsvLine(row);
+          let cells = parseCsvLine(row);
           if (cells.length !== cols.length) {
             bad.push({ line: li + 1, reason: 'col_count_mismatch', got: cells.length, expected: cols.length, row: row.slice(0, 300) });
             if (bad.length >= 5) break;
             continue;
           }
+
+          // Auto-fix: enforce 镜号 as 3-digit sequential, and fill required blanks with "无"
+          // 镜号
+          cells[0] = String(li).padStart(3, '0');
+
           for (const idx of requiredIdx) {
             if (!String(cells[idx] || '').trim()) {
-              bad.push({ line: li + 1, reason: 'required_empty', col: cols[idx], row: row.slice(0, 300) });
-              break;
+              cells[idx] = '无';
             }
           }
-          if (bad.length >= 5) break;
+
+          // Special: if 角色 is 无, then 服装 should be 无 as well
+          const idxChar = cols.indexOf('角色');
+          const idxCost = cols.indexOf('服装');
+          if (idxChar >= 0 && idxCost >= 0) {
+            if (String(cells[idxChar]).trim() === '无' && !String(cells[idxCost] || '').trim()) {
+              cells[idxCost] = '无';
+            }
+          }
+
+          // Re-encode with quotes
+          const enc = cells.map(v => '"' + String(v ?? '').replace(/"/g, '""').replace(/\r?\n/g, '\\n') + '"').join(',');
+          fixedLines.push(enc);
         }
+
         if (bad.length) {
           return res.status(500).json({
             error: 'storyboard_csv_qc_failed',
             agent: agentId,
-            message: 'Storyboard CSV failed QC: required columns empty or CSV columns mismatch. Please retry.',
+            message: 'Storyboard CSV failed QC: column count mismatch in some rows. Please retry.',
             bad,
             raw: text.slice(0, 2000)
           });
         }
+
+        // Replace result with fixed CSV (quoted rows)
+        finalResult = fixedLines.join('\n') + '\n';
       }
     }
 
