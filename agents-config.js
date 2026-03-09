@@ -225,6 +225,17 @@ ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characte
         prompt: `你是人物+服装组合设计师。只输出严格 JSON，必须遵守 episode_scene_asset_links 的连续性约束。`
     },
 
+    ip_fusion_reactor: {
+        name: '🌍 顶尖IP搜集与杂交（Fusion Reactor）',
+        group: '統籌',
+        skills: ['language_follow', 'ip_fusion_reactor'],
+        prompt: `你是“全球顶尖IP搜集与杂交智能体”。
+
+你将收到用户目标 + 受众/地区 +（可选）趋势燃料摘要。你需要先输出可执行的 search_queries（供系统用 Brave Search 拉取燃料），再产出结构化 IP 候选、评分与 shortlist。
+
+只输出严格 JSON，遵守 ip_fusion_reactor.skill.md。`
+    },
+
     // ============== 故事組 (3) ==============
     interview: {
         name: '🎤 訪談師',
