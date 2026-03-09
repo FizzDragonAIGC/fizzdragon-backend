@@ -1512,10 +1512,18 @@ ${truncatedContent}`;
         for (let li = 1; li < lines.length; li++) {
           const row = lines[li];
           let cells = parseCsvLine(row);
+          // Auto-fix col count mismatch (best-effort salvage)
           if (cells.length !== cols.length) {
-            bad.push({ line: li + 1, reason: 'col_count_mismatch', got: cells.length, expected: cols.length, row: row.slice(0, 300) });
-            if (bad.length >= 5) break;
-            continue;
+            // If too many cells, merge extras into last column
+            if (cells.length > cols.length) {
+              const head = cells.slice(0, cols.length - 1);
+              const tail = cells.slice(cols.length - 1).join('，');
+              cells = head.concat([tail]);
+            }
+            // If too few cells, pad missing with empty
+            if (cells.length < cols.length) {
+              cells = cells.concat(Array(cols.length - cells.length).fill(''));
+            }
           }
 
           // Auto-fix: enforce 镜号 as 3-digit sequential, and fill required blanks with "无"
@@ -1542,11 +1550,12 @@ ${truncatedContent}`;
           fixedLines.push(enc);
         }
 
+        // If we still detected hard failures, return error (rare)
         if (bad.length) {
           return res.status(500).json({
             error: 'storyboard_csv_qc_failed',
             agent: agentId,
-            message: 'Storyboard CSV failed QC: column count mismatch in some rows. Please retry.',
+            message: 'Storyboard CSV failed QC: unrecoverable row issues. Please retry.',
             bad,
             raw: text.slice(0, 2000)
           });
