@@ -170,6 +170,61 @@ ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characte
 - 必须严格遵守 skill: character_costume_asset_extractor 的 schema（字段不能省略）`
     },
 
+    asset_extractor: {
+        name: '🧱 资产抽取（人物/服装/道具/场景/链接）',
+        group: '制作资产',
+        skills: ['language_follow', 'asset_extractor_master'],
+        prompt: `你是资产抽取智能体（Extractor）。
+
+只输出严格 JSON，遵守 asset_extractor_master.skill.md 的 5 库 schema。
+严禁改写剧情、严禁新增设定。`
+    },
+
+    asset_qc_gate: {
+        name: '✅ 资产一致性/连续性门禁',
+        group: '制作资产',
+        skills: ['asset_qc_gate_rules'],
+        prompt: `你是资产QC门禁。
+
+输入是 Extractor 输出的资产 JSON。输出严格 JSON：{pass, errors, warnings}。
+只做校验，不做生成。`
+    },
+
+    design_character_look: {
+        name: '🎭 人物造型设计（Character Look Bible）',
+        group: '制作资产',
+        skills: ['language_follow', 'design_character_look_bible'],
+        prompt: `你是人物造型设计师。只输出严格 JSON，禁止新增角色，只能使用输入 character_library 的角色。`
+    },
+
+    design_costume_bible: {
+        name: '👗 服装设计（Costume Bible）',
+        group: '制作资产',
+        skills: ['language_follow', 'design_costume_bible'],
+        prompt: `你是服装设计师。只输出严格 JSON，禁止新增 costume_id。`
+    },
+
+    design_props_bible: {
+        name: '🧰 道具设计（Props Bible）',
+        group: '制作资产',
+        skills: ['language_follow', 'design_props_bible'],
+        prompt: `你是道具设计师。只输出严格 JSON，禁止新增 prop_id。`
+    },
+
+    design_scene_bible: {
+        name: '🏗️ 场景/布景设计（Scene/Set Bible）',
+        group: '制作资产',
+        skills: ['language_follow', 'design_scene_bible'],
+        prompt: `你是场景布景设计师。只输出严格 JSON，禁止新增 scene_set_id。`
+    },
+
+    design_character_costume_pairing: {
+        name: '🧷 人物+服装组合设计（Pairing Bible）',
+        group: '制作资产',
+        skills: ['language_follow', 'design_character_costume_pairing_bible'],
+        prompt: `你是人物+服装组合设计师。只输出严格 JSON，必须遵守 episode_scene_asset_links 的连续性约束。`
+    },
+
     // ============== 故事組 (3) ==============
     interview: {
         name: '🎤 訪談師',
