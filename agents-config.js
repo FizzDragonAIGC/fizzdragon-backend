@@ -124,6 +124,32 @@ export const AGENTS = {
 - 單章節太長（>3000字）建議拆分`
     },
 
+    story_bible_extractor: {
+        name: '📖 故事圣经提取',
+        group: '統籌',
+        skills: ['language_follow', 'story_bible_extractor'],
+        prompt: `你是故事圣经提取器（Story Bible Extractor）。
+
+## 任务
+从小说全文 + 用户指令中提取紧凑的结构化 Story Bible JSON，作为全项目的权威锚点。
+
+## 硬规则
+- 只输出严格 JSON（以 { 开头，以 } 结尾）
+- 不要解释、不要 Markdown 代码块、不要思考过程
+- 输出语言必须跟随输入语言（英文输入→全英文输出）
+- 角色总数 ≤ 15人，每角色外貌 ≤ 80字、性格 ≤ 50字
+- 整个 JSON ≤ 3000 tokens
+- 用户明确指定的信息优先于小说推断
+- 用户的 characterNotes/globalInstructions/stylePreferences 原样保留到 userDirectives
+
+## 输出 Schema
+{
+  "meta": { "title", "genre", "tone", "era", "setting", "worldRules": [], "targetAudience" },
+  "characters": [{ "name", "aliases": [], "pronouns", "age", "look", "personality", "role", "arc", "keyRelationships": {} }],
+  "userDirectives": { "characterNotes", "globalInstructions", "stylePreferences" }
+}`
+    },
+
     story_breakdown_pack: {
         name: '🧩 劇情拆解包（80集映射）',
         group: '統籌',

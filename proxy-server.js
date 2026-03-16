@@ -144,6 +144,7 @@ function needsJsonOutput(agentId) {
     'episode_mapping_pack', // 分集映射表CSV - 自然語言/CSV
     'story_breakdown_pack', // 劇情拆解包（80集映射）- CSV
     'storyboard_csv', // 分镜表CSV(单表) - CSV
+    'aggregate',     // 聚合分段結果 - CSV
     'script',        // 劇本
     'dialogue',      // 對話
     'acting',        // 演技指導
@@ -259,6 +260,452 @@ function validateAndFixCharacters(data) {
   });
   
   return data;
+}
+
+// ========== Pipeline 工具函数 ==========
+
+// 从小说文本构建 source_range 分段索引（用于 story_breakdown_pack）
+function buildSourceRanges(text, target = 80) {
+  const lines = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const headRe = /^\s*(Chapter\s+\d+\s*\|.*|CHAPTER\s+\d+\s*\|.*)\s*$/i;
+  const heads = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (headRe.test(lines[i])) heads.push({ idx: i, title: lines[i].trim() });
+  }
+  const segments = [];
+  if (heads.length === 0) {
+    const per = Math.max(1, Math.floor(lines.length / target));
+    for (let e = 0; e < target; e++) {
+      const start = e * per;
+      const end = (e === target - 1) ? (lines.length - 1) : Math.min(lines.length - 1, (e + 1) * per - 1);
+      segments.push({ startLine: start + 1, endLine: end + 1, title: `Segment ${e + 1}` });
+    }
+    return segments;
+  }
+  for (let h = 0; h < heads.length; h++) {
+    const start = heads[h].idx;
+    const end = (h === heads.length - 1) ? (lines.length - 1) : (heads[h + 1].idx - 1);
+    segments.push({ startLine: start + 1, endLine: end + 1, title: heads[h].title });
+  }
+  while (segments.length > target) {
+    let minI = 0, minLen = Infinity;
+    for (let i = 0; i < segments.length; i++) {
+      const len = segments[i].endLine - segments[i].startLine;
+      if (len < minLen) { minLen = len; minI = i; }
+    }
+    const i = minI;
+    const j = (i === 0) ? 1 : i - 1;
+    const a = segments[Math.min(i, j)];
+    const b = segments[Math.max(i, j)];
+    const merged = {
+      startLine: Math.min(a.startLine, b.startLine),
+      endLine: Math.max(a.endLine, b.endLine),
+      title: (a.title + ' + ' + b.title).slice(0, 160)
+    };
+    segments.splice(Math.max(i, j), 1);
+    segments.splice(Math.min(i, j), 1, merged);
+  }
+  while (segments.length < target) {
+    let maxI = 0, maxLen = -1;
+    for (let i = 0; i < segments.length; i++) {
+      const len = segments[i].endLine - segments[i].startLine;
+      if (len > maxLen) { maxLen = len; maxI = i; }
+    }
+    const seg = segments[maxI];
+    const mid = Math.floor((seg.startLine + seg.endLine) / 2);
+    const left = { startLine: seg.startLine, endLine: mid, title: seg.title + ' (A)' };
+    const right = { startLine: mid + 1, endLine: seg.endLine, title: seg.title + ' (B)' };
+    segments.splice(maxI, 1, left, right);
+  }
+  return segments;
+}
+
+const BREAKDOWN_CSV_HEADER = 'ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characters,must_keep,no_add';
+
+function csvEscape(value) {
+  const text = String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (!text) return '';
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function extractJsonPayload(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+
+  const fenced = raw.match(/```(?:json)?\s*\n([\s\S]*?)\n```/i);
+  const candidate = fenced ? fenced[1].trim() : raw;
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    // fall through
+  }
+
+  const firstBrace = candidate.indexOf('{');
+  const lastBrace = candidate.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(candidate.slice(firstBrace, lastBrace + 1));
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function extractBreakdownCsv(text, targetEpisodes) {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+
+  const fenced = raw.match(/```(?:csv)?\s*\n([\s\S]*?)\n```/i);
+  const candidate = (fenced ? fenced[1] : raw).trim();
+  const lines = candidate
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  const headerIndex = lines.findIndex(line => line === BREAKDOWN_CSV_HEADER);
+  if (headerIndex === -1) return '';
+
+  const endIndex = Math.min(lines.length, headerIndex + targetEpisodes + 1);
+  return lines.slice(headerIndex, endIndex).join('\n');
+}
+
+function splitSummaryParts(text) {
+  return String(text || '')
+    .split(/[。！？.!?]+/)
+    .map(part => part.trim())
+    .filter(Boolean);
+}
+
+function buildAggregateCsvFromJson(payload, segments, targetEpisodes) {
+  const episodes = Array.isArray(payload?.episodes) ? payload.episodes : null;
+  if (!episodes || episodes.length === 0) return '';
+
+  const rows = [BREAKDOWN_CSV_HEADER];
+  for (let i = 0; i < targetEpisodes; i++) {
+    const episode = episodes[i] || {};
+    const segment = segments[i] || { startLine: 1, endLine: 1 };
+    const epId = `E${String(i + 1).padStart(3, '0')}`;
+    const scenes = Array.isArray(episode.scenes)
+      ? episode.scenes.filter(Boolean)
+      : String(episode.scenes || '')
+        .split(/[;；\n]+/)
+        .map(item => item.trim())
+        .filter(Boolean);
+    const characters = Array.isArray(episode.characters)
+      ? episode.characters.filter(Boolean)
+      : String(episode.characters || '')
+        .split(/[;；,，/]+/)
+        .map(item => item.trim())
+        .filter(Boolean);
+    const summary = String(episode.summary || episode.one_line_plot || episode.title || '').trim();
+    const summaryParts = splitSummaryParts(summary);
+    const setup = String(episode.setup || summaryParts[0] || episode.title || summary).trim();
+    const development = String(episode.development || summaryParts[1] || summary || setup).trim();
+    const turn = String(episode.turn || summaryParts[2] || episode.hook || scenes.at(-1) || development).trim();
+    const hook = String(episode.hook || turn || development).trim();
+    const oneLinePlot = String(episode.one_line_plot || summary || `${episode.title || epId}: ${hook}`).trim();
+    const mustKeep = Array.isArray(episode.must_keep)
+      ? episode.must_keep.filter(Boolean)
+      : [summary || oneLinePlot, scenes[0] || hook].filter(Boolean);
+    const noAdd = Array.isArray(episode.no_add)
+      ? episode.no_add.filter(Boolean)
+      : ['Do not add new major characters', 'Do not add new core conspiracies'];
+
+    rows.push([
+      epId,
+      `${segment.startLine}-${segment.endLine}`,
+      oneLinePlot,
+      setup,
+      development,
+      turn,
+      hook,
+      scenes.join('; '),
+      characters.join('; '),
+      mustKeep.join('; '),
+      noAdd.join('; ')
+    ].map(csvEscape).join(','));
+  }
+
+  return rows.join('\n');
+}
+
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          cell += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (ch === '\n') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else if (ch === '\r') {
+      if (text[i + 1] === '\n') i++;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+
+  if (cell || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function parseCsvTable(text) {
+  const csvText = extractBreakdownCsv(text, 200) || String(text || '').trim();
+  if (!csvText) return null;
+
+  const rows = parseCsvRows(csvText);
+  if (!rows.length) return null;
+
+  const headers = rows[0].map(cell => String(cell || '').trim());
+  const dataRows = rows.slice(1).filter(row => row.some(cell => String(cell || '').trim()));
+  return {
+    headers,
+    rows: dataRows.map(row => {
+      const record = {};
+      headers.forEach((header, index) => {
+        record[header] = String(row[index] || '').trim();
+      });
+      return record;
+    })
+  };
+}
+
+function parseSourceRange(rangeText) {
+  const match = String(rangeText || '').match(/(\d+)\s*-\s*(\d+)/);
+  if (!match) return null;
+  return {
+    startLine: Number(match[1]),
+    endLine: Number(match[2])
+  };
+}
+
+function buildChunkLineRanges(text, chunkCount, chunkSize) {
+  const normalized = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const ranges = [];
+
+  for (let i = 0; i < chunkCount; i++) {
+    const start = i * chunkSize;
+    const end = Math.min(normalized.length, start + chunkSize);
+    const before = normalized.slice(0, start);
+    const chunkText = normalized.slice(start, end);
+    const startLine = before ? before.split('\n').length : 1;
+    const lineCount = chunkText ? chunkText.split('\n').length : 1;
+    ranges.push({
+      startLine,
+      endLine: startLine + lineCount - 1
+    });
+  }
+
+  return ranges;
+}
+
+function findBestChunkRow(rows, localMidLine, localTotalLines) {
+  let bestRow = null;
+  let bestDistance = Infinity;
+
+  for (const row of rows) {
+    const range = parseSourceRange(row.source_range);
+    if (!range) continue;
+    if (localMidLine >= range.startLine && localMidLine <= range.endLine) {
+      return row;
+    }
+    const rowMid = Math.floor((range.startLine + range.endLine) / 2);
+    const distance = Math.abs(localMidLine - rowMid);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestRow = row;
+    }
+  }
+
+  if (bestRow) return bestRow;
+  if (!rows.length) return null;
+
+  const ratio = localTotalLines > 1 ? (localMidLine - 1) / Math.max(1, localTotalLines - 1) : 0;
+  const fallbackIndex = Math.max(0, Math.min(rows.length - 1, Math.round(ratio * (rows.length - 1))));
+  return rows[fallbackIndex];
+}
+
+function buildAggregateCsvFromChunkResults(chunks, segments, novelText, chunkSize) {
+  if (!novelText || !Array.isArray(chunks) || !chunks.length) {
+    console.log(`[📚 deterministic merge] 跳過: novelText=${!!novelText}, chunks=${Array.isArray(chunks) ? chunks.length : 'N/A'}`);
+    return '';
+  }
+
+  // 每个 chunk 只做 CSV 解析（确定性合并仅处理 CSV chunk）
+  const chunkTables = chunks.map((chunk, i) => {
+    const csvTable = parseCsvTable(chunk);
+    if (csvTable && csvTable.rows.length > 0) return csvTable;
+
+    console.log(`[📚 deterministic merge] chunk ${i}: CSV 解析失敗，前100字: ${String(chunk).slice(0, 100)}`);
+    return null;
+  });
+
+  if (chunkTables.some(table => !table || !table.rows.length)) {
+    console.log(`[📚 deterministic merge] 放棄: ${chunkTables.map((t, i) => `chunk${i}=${t ? t.rows.length + '行' : 'null'}`).join(', ')}`);
+    return '';
+  }
+
+  const chunkRanges = buildChunkLineRanges(novelText, chunks.length, chunkSize);
+  const rows = [BREAKDOWN_CSV_HEADER];
+
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index];
+    const epId = `E${String(index + 1).padStart(3, '0')}`;
+    const globalMidLine = Math.floor((segment.startLine + segment.endLine) / 2);
+
+    let chunkIndex = chunkRanges.findIndex(range => globalMidLine >= range.startLine && globalMidLine <= range.endLine);
+    if (chunkIndex === -1) {
+      chunkIndex = Math.max(0, Math.min(chunkRanges.length - 1, Math.round(index / Math.max(1, segments.length - 1) * (chunkRanges.length - 1))));
+    }
+
+    const chunkRange = chunkRanges[chunkIndex];
+    const chunkTable = chunkTables[chunkIndex];
+    const localMidLine = Math.max(1, globalMidLine - chunkRange.startLine + 1);
+    const localTotalLines = Math.max(1, chunkRange.endLine - chunkRange.startLine + 1);
+    const sourceRow = findBestChunkRow(chunkTable.rows, localMidLine, localTotalLines) || {};
+
+    const oneLinePlot = sourceRow.one_line_plot || sourceRow.setup || sourceRow.development || sourceRow.turn || sourceRow.hook || '';
+    const setup = sourceRow.setup || oneLinePlot || sourceRow.development || '';
+    const development = sourceRow.development || oneLinePlot || setup || '';
+    const turn = sourceRow.turn || sourceRow.hook || development || '';
+    const hook = sourceRow.hook || turn || development || '';
+    const sceneList = sourceRow.scene_list || '';
+    const characters = sourceRow.characters || '';
+    const mustKeep = sourceRow.must_keep || [oneLinePlot, hook].filter(Boolean).join('; ');
+    const noAdd = sourceRow.no_add || 'Do not add new major characters; Do not add new core conspiracies';
+
+    rows.push([
+      epId,
+      `${segment.startLine}-${segment.endLine}`,
+      oneLinePlot,
+      setup,
+      development,
+      turn,
+      hook,
+      sceneList,
+      characters,
+      mustKeep,
+      noAdd
+    ].map(csvEscape).join(','));
+  }
+
+  return rows.join('\n');
+}
+
+// 从文本中提取 <thinking> 标签内容
+function extractThinking(text) {
+  const match = text.match(/<thinking>([\s\S]*?)<\/thinking>/);
+  if (match) {
+    return { thinking: match[1].trim(), content: text.replace(/<thinking>[\s\S]*?<\/thinking>/, '').trim() };
+  }
+  // JSON agent：如果 { 前面有大段文字，视为 thinking
+  if (text.includes('{')) {
+    const firstBrace = text.indexOf('{');
+    if (firstBrace > 80) {
+      return { thinking: text.substring(0, firstBrace).trim(), content: text.substring(firstBrace) };
+    }
+  }
+  return { thinking: null, content: text };
+}
+
+// 流式输出时实时检测 <thinking> 标签边界
+class ThinkingStreamDetector {
+  constructor() {
+    this.buffer = '';
+    this.inThinking = false;
+    this.thinkingStarted = false;
+  }
+
+  feed(chunk) {
+    const events = [];
+    this.buffer += chunk;
+
+    while (this.buffer.length > 0) {
+      if (!this.inThinking) {
+        const openIdx = this.buffer.indexOf('<thinking>');
+        if (openIdx === -1) {
+          // No tag found — check if buffer might have a partial tag at end
+          const safeCut = this.buffer.length > 10 ? this.buffer.length - 10 : 0;
+          if (safeCut > 0) {
+            events.push({ type: 'content', text: this.buffer.substring(0, safeCut) });
+            this.buffer = this.buffer.substring(safeCut);
+          }
+          break;
+        }
+        // Emit content before tag
+        if (openIdx > 0) {
+          events.push({ type: 'content', text: this.buffer.substring(0, openIdx) });
+        }
+        this.buffer = this.buffer.substring(openIdx + 10); // skip '<thinking>'
+        this.inThinking = true;
+        this.thinkingStarted = true;
+      } else {
+        const closeIdx = this.buffer.indexOf('</thinking>');
+        if (closeIdx === -1) {
+          // Still inside thinking — check for partial closing tag
+          const safeCut = this.buffer.length > 11 ? this.buffer.length - 11 : 0;
+          if (safeCut > 0) {
+            events.push({ type: 'thinking', text: this.buffer.substring(0, safeCut) });
+            this.buffer = this.buffer.substring(safeCut);
+          }
+          break;
+        }
+        // Emit thinking content up to close tag
+        if (closeIdx > 0) {
+          events.push({ type: 'thinking', text: this.buffer.substring(0, closeIdx) });
+        }
+        this.buffer = this.buffer.substring(closeIdx + 11); // skip '</thinking>'
+        this.inThinking = false;
+      }
+    }
+
+    return events;
+  }
+
+  flush() {
+    const events = [];
+    if (this.buffer.length > 0) {
+      events.push({ type: this.inThinking ? 'thinking' : 'content', text: this.buffer });
+      this.buffer = '';
+    }
+    return events;
+  }
 }
 
 // 加载agent的所有skills内容（根据版本配置动态调整）
@@ -838,7 +1285,7 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
     throw new Error(`Missing API key for ${currentProvider}. Set ${currentProvider.toUpperCase()}_API_KEY in .env`);
   }
   
-  const needsLongOutput = ['storyboard', 'narrative', 'chapters', 'concept', 'screenwriter', 'character', 'novelist', 'story_architect', 'episode_planner'].includes(agentId);
+  const needsLongOutput = ['storyboard', 'narrative', 'chapters', 'concept', 'screenwriter', 'character', 'novelist', 'story_architect', 'episode_planner', 'aggregate', 'story_breakdown_pack'].includes(agentId);
   // 🔧 分镜不再强制使用reasoner（太慢），改用普通模型+更大max_tokens
   // 前端可以指定useReasoner强制使用
   const useReasoner = options.useReasoner === true && currentProvider === 'deepseek';
@@ -847,7 +1294,7 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
   // 分镜/小说需要更多tokens
   // ⚠️ DeepSeek所有模型max_tokens上限都是8192！（包括reasoner）
   // 虽然API可能接受更高值，但响应质量会下降
-  const longOutputAgents = ['storyboard', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner', 'format_adapter'];
+  const longOutputAgents = ['storyboard', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner', 'format_adapter', 'aggregate', 'story_breakdown_pack'];
   const maxTokens = longOutputAgents.includes(agentId) ? 8192 : (needsLongOutput ? 8192 : 4096);
   
   console.log(`Calling ${provider.name} (${agentId || 'unknown'}) model: ${model}, max_tokens: ${maxTokens}`);
@@ -860,8 +1307,9 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
   
   // 🔧 添加超时控制（Render免费版30秒限制，设25秒以便返回错误）
   const controller = new AbortController();
-  // character generation often needs more time; keep within Render limits
-  const timeoutId = setTimeout(() => controller.abort(), (useReasoner || agentId === 'character') ? 120000 : 25000);
+  // 长输出agent需要更多时间（aggregate每批~6750 tokens，约120-150秒）
+  const needsLongTimeout = useReasoner || ['character', 'aggregate', 'story_breakdown_pack', 'screenwriter', 'novelist'].includes(agentId);
+  const timeoutId = setTimeout(() => controller.abort(), needsLongTimeout ? 180000 : 25000);
   
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -921,20 +1369,20 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
 }
 
 // ========== Anthropic Claude API调用 ==========
-async function callAnthropicAPI(systemPrompt, userMessage, agentId = '') {
+async function callAnthropicAPI(systemPrompt, userMessage, agentId = '', options = {}) {
   const needsLongOutput = ['storyboard', 'narrative', 'chapters', 'concept', 'screenwriter', 'character'].includes(agentId);
   let model = 'claude-3-haiku-20240307';
   let maxTokens = 4096;
-  
+
   if (needsLongOutput) {
     model = 'claude-sonnet-4-20250514';
     maxTokens = 16000;
   }
-  
+
   console.log(`Calling Anthropic (${agentId || 'unknown'}) model: ${model}`);
-  
+
   try {
-    const response = await anthropic.messages.create({
+    const createParams = {
       model: model,
       max_tokens: maxTokens,
       system: systemPrompt,
@@ -943,22 +1391,43 @@ async function callAnthropicAPI(systemPrompt, userMessage, agentId = '') {
           ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字，不要输出思考过程。只输出{开头}结尾的JSON。**'
           : '\n\n**重要：只输出最终正文（自然语言），不要JSON，不要代码块，不要解释/思考过程；输出语言必须跟随输入语言。**') }
       ]
-    });
-    
-    const text = response.content[0]?.text || '';
+    };
+
+    // Extended thinking support
+    if (options.enableThinking) {
+      createParams.thinking = { type: 'enabled', budget_tokens: options.thinkingBudget || 10000 };
+    }
+
+    const response = await anthropic.messages.create(createParams);
+
+    // Parse response — may contain thinking blocks when extended thinking is enabled
+    let text = '';
+    let reasoning = null;
+    for (const block of response.content) {
+      if (block.type === 'thinking') {
+        reasoning = (reasoning || '') + block.thinking;
+      } else if (block.type === 'text') {
+        text += block.text;
+      }
+    }
+    if (!text && response.content[0]?.text) {
+      text = response.content[0].text;
+    }
+
     const inputTokens = response.usage?.input_tokens || 0;
     const outputTokens = response.usage?.output_tokens || 0;
-    
+
     const pricing = PROVIDERS.anthropic.pricing;
     totalTokens.input += inputTokens;
     totalTokens.output += outputTokens;
     totalTokens.cost += inputTokens * pricing.input + outputTokens * pricing.output;
-    
+
     console.log(`Tokens: in=${inputTokens}, out=${outputTokens}`);
-    
+
     return {
       text: text.trim(),
-      tokens: { input: inputTokens, output: outputTokens }
+      tokens: { input: inputTokens, output: outputTokens },
+      reasoning
     };
   } catch (err) {
     console.error('Anthropic API error:', err.message);
@@ -1028,7 +1497,7 @@ async function callGeminiAPI(systemPrompt, userMessage, agentId = '') {
 // ========== 统一调用入口 ==========
 async function callClaudeInternal(systemPrompt, userMessage, agentId = '', options = {}) {
   if (currentProvider === 'anthropic') {
-    return callAnthropicAPI(systemPrompt, userMessage, agentId);
+    return callAnthropicAPI(systemPrompt, userMessage, agentId, options);
   } else if (currentProvider === 'gemini') {
     return callGeminiAPI(systemPrompt, userMessage, agentId);
   } else {
@@ -1039,6 +1508,161 @@ async function callClaudeInternal(systemPrompt, userMessage, agentId = '', optio
 
 // 兼容旧代码的别名
 const callOpenAICompatible = callWithFallback;
+
+// ========== 流式 LLM 调用（支持所有 provider + 思考过程检测）==========
+async function callClaudeWithStreaming(systemPrompt, userMessage, agentId, options, callbacks) {
+  const { onThinking, onContent, onDone, onError } = callbacks;
+  let fullText = '';
+  let fullThinking = '';
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  try {
+    if (currentProvider === 'anthropic') {
+      // Anthropic streaming with SDK
+      const createParams = {
+        model: options.model || 'claude-sonnet-4-20250514',
+        max_tokens: options.maxTokens || 16000,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMessage }],
+        stream: true
+      };
+      if (options.enableThinking) {
+        createParams.thinking = { type: 'enabled', budget_tokens: options.thinkingBudget || 10000 };
+      }
+
+      const stream = anthropic.messages.stream(createParams);
+
+      stream.on('thinking', (thinking) => {
+        fullThinking += thinking;
+        onThinking?.(thinking);
+      });
+
+      stream.on('text', (text) => {
+        fullText += text;
+        onContent?.(text);
+      });
+
+      const finalMessage = await stream.finalMessage();
+      inputTokens = finalMessage.usage?.input_tokens || 0;
+      outputTokens = finalMessage.usage?.output_tokens || 0;
+
+      // Track tokens
+      const pricing = PROVIDERS.anthropic.pricing;
+      totalTokens.input += inputTokens;
+      totalTokens.output += outputTokens;
+      totalTokens.cost += inputTokens * pricing.input + outputTokens * pricing.output;
+
+    } else {
+      // OpenAI-compatible providers (DeepSeek, OpenRouter, etc.)
+      const provider = PROVIDERS[currentProvider];
+      const apiKey = process.env[`${currentProvider.toUpperCase()}_API_KEY`] || process.env.DEEPSEEK_API_KEY;
+      const baseUrl = provider.baseUrl;
+      const detector = new ThinkingStreamDetector();
+
+      const selectedModel = options.model || provider.models.standard;
+      console.log(`[Stream] Calling ${provider.name} (${selectedModel}), prompt: ${systemPrompt.length + userMessage.length} chars`);
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          ...(currentProvider === 'openrouter' ? { 'HTTP-Referer': 'https://fizzdragon.com' } : {})
+        },
+        body: JSON.stringify({
+          model: options.model || provider.models.standard,
+          max_tokens: options.maxTokens || 8192,
+          stream: true,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage }
+          ]
+        })
+      });
+
+      console.log(`[Stream] ${provider.name} response status: ${response.status}`);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`${provider.name} API error: ${response.status} ${errText}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      console.log(`[Stream] Starting to read ${provider.name} stream...`);
+      let chunkCount = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunkCount++;
+        if (chunkCount <= 2) console.log(`[Stream] Chunk #${chunkCount} received, ${value.length} bytes`);
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n').filter(line => line.startsWith('data: '));
+
+        for (const line of lines) {
+          const data = line.slice(6);
+          if (data === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(data);
+            const delta = parsed.choices?.[0]?.delta;
+
+            // DeepSeek reasoning_content
+            if (delta?.reasoning_content) {
+              fullThinking += delta.reasoning_content;
+              onThinking?.(delta.reasoning_content);
+              continue;
+            }
+
+            const content = delta?.content || '';
+            if (content) {
+              // Use ThinkingStreamDetector for <thinking> tag detection
+              const events = detector.feed(content);
+              for (const evt of events) {
+                if (evt.type === 'thinking') {
+                  fullThinking += evt.text;
+                  onThinking?.(evt.text);
+                } else {
+                  fullText += evt.text;
+                  onContent?.(evt.text);
+                }
+              }
+            }
+
+            // Token usage (some providers send in final chunk)
+            if (parsed.usage) {
+              inputTokens = parsed.usage.prompt_tokens || 0;
+              outputTokens = parsed.usage.completion_tokens || 0;
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }
+
+      // Flush detector buffer
+      const remaining = detector.flush();
+      for (const evt of remaining) {
+        if (evt.type === 'thinking') {
+          fullThinking += evt.text;
+          onThinking?.(evt.text);
+        } else {
+          fullText += evt.text;
+          onContent?.(evt.text);
+        }
+      }
+
+      // Track tokens
+      totalTokens.input += inputTokens;
+      totalTokens.output += outputTokens;
+      totalTokens.cost += inputTokens * provider.pricing.input + outputTokens * provider.pricing.output;
+    }
+
+    onDone?.(fullText, fullThinking || null, { input: inputTokens, output: outputTokens });
+    return { text: fullText, reasoning: fullThinking || null, tokens: { input: inputTokens, output: outputTokens } };
+  } catch (err) {
+    onError?.(err);
+    throw err;
+  }
+}
 
 // ========== 流式API（解决Cloudflare 100秒超时）==========
 app.post('/api/agent-stream/:agentId', async (req, res) => {
@@ -1254,69 +1878,6 @@ ${truncatedContent}`;
 
     // ============ story_breakdown_pack ============
     } else if (agentId === 'story_breakdown_pack') {
-      // Build a deterministic 80-episode source_range index from the provided text
-      const buildSourceRanges = (text, target=80) => {
-        const lines = String(text||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
-        const headRe = /^\s*(Chapter\s+\d+\s*\|.*|CHAPTER\s+\d+\s*\|.*)\s*$/i;
-        const heads = [];
-        for (let i=0;i<lines.length;i++) {
-          if (headRe.test(lines[i])) heads.push({ idx:i, title: lines[i].trim() });
-        }
-        // fallback: if no chapter headings, evenly split by lines
-        const segments = [];
-        if (heads.length === 0) {
-          const per = Math.max(1, Math.floor(lines.length/target));
-          for (let e=0;e<target;e++) {
-            const start = e*per;
-            const end = (e===target-1) ? (lines.length-1) : Math.min(lines.length-1, (e+1)*per-1);
-            segments.push({ startLine:start+1, endLine:end+1, title:`Segment ${e+1}` });
-          }
-          return segments;
-        }
-        // build chapter segments
-        for (let h=0;h<heads.length;h++) {
-          const start = heads[h].idx;
-          const end = (h===heads.length-1) ? (lines.length-1) : (heads[h+1].idx-1);
-          segments.push({ startLine:start+1, endLine:end+1, title: heads[h].title });
-        }
-        // If chapters > target, merge adjacent chapters
-        while (segments.length > target) {
-          // merge the shortest with neighbor
-          let minI = 0;
-          let minLen = Infinity;
-          for (let i=0;i<segments.length;i++) {
-            const len = segments[i].endLine - segments[i].startLine;
-            if (len < minLen) { minLen=len; minI=i; }
-          }
-          const i = minI;
-          const j = (i===0) ? 1 : i-1;
-          const a = segments[Math.min(i,j)];
-          const b = segments[Math.max(i,j)];
-          const merged = {
-            startLine: Math.min(a.startLine,b.startLine),
-            endLine: Math.max(a.endLine,b.endLine),
-            title: (a.title + ' + ' + b.title).slice(0,160)
-          };
-          segments.splice(Math.max(i,j),1);
-          segments.splice(Math.min(i,j),1,merged);
-        }
-        // If chapters < target, split longest segments
-        while (segments.length < target) {
-          let maxI = 0;
-          let maxLen = -1;
-          for (let i=0;i<segments.length;i++) {
-            const len = segments[i].endLine - segments[i].startLine;
-            if (len > maxLen) { maxLen=len; maxI=i; }
-          }
-          const seg = segments[maxI];
-          const mid = Math.floor((seg.startLine + seg.endLine) / 2);
-          const left = { startLine: seg.startLine, endLine: mid, title: seg.title + ' (A)' };
-          const right = { startLine: mid+1, endLine: seg.endLine, title: seg.title + ' (B)' };
-          segments.splice(maxI,1,left,right);
-        }
-        return segments;
-      };
-
       const target = 80;
       const segs = buildSourceRanges(truncatedContent, target);
       const indexLines = segs.map((s,i)=>{
@@ -1591,6 +2152,86 @@ ${truncatedContent}`;
   }
 });
 
+// ========== Pipeline API (modular) ==========
+import { createPipelineRouter } from './pipeline/index.js';
+const pipelineRouter = createPipelineRouter({
+  AGENTS, loadAgentSkills, needsJsonOutput,
+  callClaude, callClaudeWithStreaming,
+  requireAuth, extractThinking, buildSourceRanges,
+  _PROVIDERS: PROVIDERS
+});
+app.use('/api/pipeline', pipelineRouter);
+
+// ========== Pipeline Stream Routes (registered on main app to avoid Express sub-router SSE buffering) ==========
+import { PIPELINE_AGENT_MAP, PIPELINE_STEPS } from './pipeline/config.js';
+import { buildPipelinePrompt } from './pipeline/services/prompt-builder.js';
+
+for (const stepId of PIPELINE_STEPS) {
+  app.post(`/api/pipeline/${stepId}/stream`, requireAuth, async (req, res) => {
+    console.log(`[Pipeline:${stepId}/stream] Request received`);
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    let closed = false;
+    req.on('close', () => { closed = true; });
+    const write = (data) => { if (!closed) try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {} };
+
+    try {
+      const deps = { AGENTS, loadAgentSkills, needsJsonOutput, buildSourceRanges };
+      const { systemPrompt, userMessage, agentId } = buildPipelinePrompt(stepId, req.body, deps);
+      console.log(`[Pipeline:${stepId}/stream] Calling ${agentId}`);
+
+      const provider = PROVIDERS[currentProvider];
+      const apiKey = process.env[`${currentProvider.toUpperCase()}_API_KEY`] || process.env.DEEPSEEK_API_KEY;
+      const baseUrl = provider.baseUrl;
+      const model = provider.models.standard;
+
+      const apiResp = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model, max_tokens: 8192, stream: true,
+          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]
+        })
+      });
+
+      if (!apiResp.ok) {
+        const errText = await apiResp.text().catch(() => '');
+        throw new Error(`${provider.name} API error: ${apiResp.status} ${errText}`);
+      }
+
+      const reader = apiResp.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '', fullThinking = '', inputTokens = 0, outputTokens = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const lines = decoder.decode(value).split('\n').filter(l => l.startsWith('data: '));
+        for (const line of lines) {
+          const data = line.slice(6);
+          if (data === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(data);
+            const delta = parsed.choices?.[0]?.delta;
+            if (delta?.reasoning_content) { fullThinking += delta.reasoning_content; write({ type: 'thinking', content: delta.reasoning_content }); }
+            else if (delta?.content) { fullText += delta.content; write({ type: 'chunk', content: delta.content }); }
+            if (parsed.usage) { inputTokens = parsed.usage.prompt_tokens || 0; outputTokens = parsed.usage.completion_tokens || 0; }
+          } catch {}
+        }
+      }
+      write({ type: 'done', fullText, fullThinking: fullThinking || null, tokens: { input: inputTokens, output: outputTokens } });
+    } catch (err) {
+      console.error(`[Pipeline:${stepId}/stream] Error:`, err.message);
+      write({ type: 'error', error: err.message });
+    }
+    if (!closed) res.end();
+  });
+}
+
 // 动态配置API（必须在/:legacy之前）
 app.post('/api/config', (req, res) => {
   const { maxSkills, contentLimit, provider } = req.body;
@@ -1620,7 +2261,7 @@ const LEGACY_MAP = {
 
 app.post('/api/:legacy', async (req, res, next) => {
   // 跳过特殊路由（交给后续handler处理）
-  const specialRoutes = ['stream', 'config', 'tokens', 'agents', 'providers'];
+  const specialRoutes = ['stream', 'config', 'tokens', 'agents', 'providers', 'pipeline'];
   if (specialRoutes.includes(req.params.legacy)) {
     return next('route');
   }
@@ -2361,13 +3002,22 @@ app.post('/api/novel/structure', async (req, res) => {
 
 // 2. 分段處理長篇小說
 app.post('/api/novel/chunk', async (req, res) => {
-  const { novel, chunkIndex, chunkSize = 8000, totalChunks, context, agentId = 'interview' } = req.body;
-  
-  if (!novel) return res.status(400).json({ error: '缺少小說內容' });
-  
-  const start = chunkIndex * chunkSize;
-  const end = Math.min(start + chunkSize, novel.length);
-  const chunk = novel.substring(start, end);
+  const { novel, chunkText, chunkIndex, chunkSize = 8000, totalChunks, context, agentId = 'interview' } = req.body;
+
+  // 支持前端预切片 (chunkText) 或后端切片 (novel)
+  let chunk;
+  let start, end;
+  if (chunkText) {
+    chunk = chunkText;
+    start = chunkIndex * chunkSize;
+    end = start + chunkText.length;
+  } else if (novel) {
+    start = chunkIndex * chunkSize;
+    end = Math.min(start + chunkSize, novel.length);
+    chunk = novel.substring(start, end);
+  } else {
+    return res.status(400).json({ error: '缺少小說內容 (novel 或 chunkText)' });
+  }
   
   console.log(`[📚 長篇處理] 處理第 ${chunkIndex + 1}/${totalChunks} 段 (${start}-${end})`);
   
@@ -2385,8 +3035,7 @@ ${skillsContent}
 - 前文摘要：${context?.previousSummary || '這是開頭'}
 - 當前位置：第 ${start}-${end} 字
 - 請分析這一段的內容，提取關鍵信息
-
-直接輸出JSON。`;
+- 嚴格按照上方指定的輸出格式（CSV 或 JSON）直接輸出，不要加任何解釋`;
 
   try {
     const result = await callClaude(systemPrompt, chunk, agentId);
@@ -2403,43 +3052,352 @@ ${skillsContent}
 
 // 3. 聚合分段結果
 app.post('/api/novel/aggregate', async (req, res) => {
-  const { chunks, targetEpisodes, title } = req.body;
+  const { chunks, targetEpisodes, title, novelText, chunkSize = 100000 } = req.body;
   
   if (!chunks || !chunks.length) return res.status(400).json({ error: '缺少分段數據' });
   
-  console.log(`[📚 長篇處理] 聚合 ${chunks.length} 段結果 → ${targetEpisodes} 集`);
-  
-  const systemPrompt = `你是番劇策劃專家。根據分段分析結果，規劃完整的集數大綱。
+  const totalEpisodes = Math.max(1, Number(targetEpisodes) || 80);
+  const segments = buildSourceRanges(novelText || '', totalEpisodes);
+
+  console.log(`[📚 長篇處理] 聚合 ${chunks.length} 段結果 → ${totalEpisodes} 集`);
+
+  try {
+    // --- 分批调用模型 (primary path) ---
+    // DeepSeek max_tokens=8192，每行CSV约250 tokens，27集≈6750 tokens，安全在限内
+    const BATCH_SIZE = 27;
+    const batchCount = Math.ceil(totalEpisodes / BATCH_SIZE);
+    const chunksStr = chunks.map((chunk, index) => `[段落${index + 1}]\n${chunk}`).join('\n\n');
+    // 每批限制 chunk 文本长度（留足空间给 system prompt + source index）
+    const maxChunkTextPerBatch = 16000;
+
+    const batchPromises = [];
+    for (let b = 0; b < batchCount; b++) {
+      const batchStart = b * BATCH_SIZE;              // 0-indexed
+      const batchEnd = Math.min(totalEpisodes, (b + 1) * BATCH_SIZE);
+      const batchEpStart = `E${String(batchStart + 1).padStart(3, '0')}`;
+      const batchEpEnd = `E${String(batchEnd).padStart(3, '0')}`;
+      const batchSegments = segments.slice(batchStart, batchEnd);
+      const batchSourceIndex = batchSegments.map((seg, i) => {
+        const epId = `E${String(batchStart + i + 1).padStart(3, '0')}`;
+        return `${epId},${seg.startLine}-${seg.endLine},${(seg.title || '').replace(/,/g, ' ')}`;
+      }).join('\n');
+
+      const batchSystemPrompt = `你是番劇策劃專家。根據分段分析結果，規劃第 ${batchEpStart}-${batchEpEnd} 集的大綱。
+
+## 思考過程
+先在 <thinking>...</thinking> 標籤內簡要分析（200字以內）：原著核心衝突、本批次劇情節奏、關鍵轉折點。然後直接輸出 CSV。
 
 ## 要求
-- 目標集數：${targetEpisodes}集
+- 本批次輸出 ${batchEnd - batchStart} 集（${batchEpStart}-${batchEpEnd}）
 - 每集3-8分鐘
 - 包含起承轉合節奏
 - 每集有明確的戲劇鉤子
+- source_range 只能使用我提供的 SOURCE RANGE INDEX，禁止自行改寫行號
+- 不能新增主線人物 / 組織 / 核心陰謀
+- 輸出必須是 CSV 純文本，不要 Markdown、不要 JSON、不要解釋
 
-輸出JSON：
-{
-  "title": "${title || '未命名'}",
-  "totalEpisodes": ${targetEpisodes},
-  "episodes": [
-    {
-      "ep": 1,
-      "title": "第1集標題",
-      "summary": "劇情摘要",
-      "scenes": ["場景1", "場景2"],
-      "hook": "本集鉤子",
-      "phase": "起/承/轉/合"
-    },
-    ...
-  ]
-}`;
+## CSV表頭（必須一字不差）
+${BREAKDOWN_CSV_HEADER}
 
-  try {
-    const chunksStr = chunks.map((c, i) => `[段落${i+1}]:\n${c}`).join('\n\n');
-    const result = await callClaude(systemPrompt, chunksStr.substring(0, 15000), 'aggregate');
-    res.json({ result: result.text });
+## CSV規則
+- 必須輸出 ${batchEnd - batchStart} 行（${batchEpStart}-${batchEpEnd}）
+- 每行 11 欄都要填滿，禁止空欄
+- scene_list：用分號;分隔 3-6 個場景，使用 slugline 風格
+- characters / must_keep / no_add：用分號;分隔多項
+  - source_range 必須逐行對應 SOURCE RANGE INDEX
+  - 語言跟隨原文語言`;
+
+      const batchUserMessage = `TITLE: ${title || '未命名'}
+
+SOURCE RANGE INDEX for ${batchEpStart}-${batchEpEnd} (ep_id,source_range,segment_title)
+${batchSourceIndex}
+
+CHUNK ANALYSES
+${chunksStr.substring(0, maxChunkTextPerBatch)}`;
+
+      console.log(`[📚 聚合] 發起 batch ${b + 1}/${batchCount}: ${batchEpStart}-${batchEpEnd} (${batchEnd - batchStart} 集)`);
+      batchPromises.push(
+        callClaude(batchSystemPrompt, batchUserMessage, 'aggregate')
+          .then(result => {
+            const csv = extractBreakdownCsv(result.text, batchEnd - batchStart);
+            if (csv) return csv;
+            // 模型可能返回 JSON，尝试转换
+            const payload = extractJsonPayload(result.text);
+            if (payload) return buildAggregateCsvFromJson(payload, batchSegments, batchEnd - batchStart);
+            return null;
+          })
+          .catch(err => {
+            console.error(`[📚 聚合] batch ${b + 1} 失敗:`, err.message);
+            return null;
+          })
+      );
+    }
+
+    const batchResults = await Promise.all(batchPromises);
+    console.log(`[📚 聚合] 批次結果: ${batchResults.map((r, i) => `batch${i + 1}=${r ? '成功' : '失敗'}`).join(', ')}`);
+
+    // --- 合并批次 CSV ---
+    const mergedRows = [BREAKDOWN_CSV_HEADER];
+    const coveredEpisodes = new Set();
+
+    for (const batchCsv of batchResults) {
+      if (!batchCsv) continue;
+      const lines = batchCsv.split('\n');
+      for (const line of lines) {
+        if (line === BREAKDOWN_CSV_HEADER) continue;
+        const epMatch = line.match(/^(E\d{3})/);
+        if (epMatch && !coveredEpisodes.has(epMatch[1])) {
+          coveredEpisodes.add(epMatch[1]);
+          mergedRows.push(line);
+        }
+      }
+    }
+
+    console.log(`[📚 聚合] 模型批次合計: ${coveredEpisodes.size}/${totalEpisodes} 集`);
+
+    // --- 补齐缺失集数 (deterministic fallback) ---
+    if (coveredEpisodes.size < totalEpisodes) {
+      console.log(`[📚 聚合] 缺少 ${totalEpisodes - coveredEpisodes.size} 集，用 deterministic merge 补齐`);
+      const fallbackCsv = buildAggregateCsvFromChunkResults(chunks, segments, novelText || '', Number(chunkSize) || 100000);
+      if (fallbackCsv) {
+        const fallbackLines = fallbackCsv.split('\n');
+        for (const line of fallbackLines) {
+          if (line === BREAKDOWN_CSV_HEADER) continue;
+          const epMatch = line.match(/^(E\d{3})/);
+          if (epMatch && !coveredEpisodes.has(epMatch[1])) {
+            coveredEpisodes.add(epMatch[1]);
+            mergedRows.push(line);
+          }
+        }
+      }
+    }
+
+    // --- 按 ep_id 排序 ---
+    const header = mergedRows[0];
+    const dataRows = mergedRows.slice(1).sort((a, b) => {
+      const aId = a.match(/^E(\d{3})/);
+      const bId = b.match(/^E(\d{3})/);
+      return (aId ? parseInt(aId[1]) : 0) - (bId ? parseInt(bId[1]) : 0);
+    });
+
+    const finalCsv = [header, ...dataRows].join('\n');
+    const finalRowCount = dataRows.length;
+
+    if (finalRowCount === 0) {
+      return res.status(502).json({
+        error: 'aggregate_empty',
+        message: '聚合結果為空：所有批次均失敗且 deterministic merge 也無法生成'
+      });
+    }
+
+    console.log(`[📚 聚合] 最終 CSV: ${finalRowCount}/${totalEpisodes} 集`);
+    if (finalRowCount < totalEpisodes) {
+      console.warn(`[📚 聚合] ⚠️ 最終只有 ${finalRowCount} 集，目標 ${totalEpisodes} 集`);
+    }
+
+    res.json({ result: finalCsv });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// 3b. 聚合分段結果（SSE 流式版本，避免 Render 30s 超時）
+app.post('/api/novel/aggregate-stream', async (req, res) => {
+  const { chunks, targetEpisodes, title, novelText, chunkSize = 100000 } = req.body;
+
+  if (!chunks || !chunks.length) return res.status(400).json({ error: '缺少分段數據' });
+
+  // SSE 头 + cork/uncork safe writer for concurrent batch writes
+  req.socket?.setNoDelay?.(true);
+  res.socket?.setNoDelay?.(true);
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.flushHeaders();
+
+  let sseConnectionClosed = false;
+  res.on('close', () => { sseConnectionClosed = true; });
+  const send = (obj) => {
+    if (sseConnectionClosed) return;
+    try {
+      res.write(`data: ${JSON.stringify(obj)}\n\n`);
+    } catch { /* ignore write errors on closed connections */ }
+  };
+
+  const totalEpisodes = Math.max(1, Number(targetEpisodes) || 80);
+  const segments = buildSourceRanges(novelText || '', totalEpisodes);
+
+  console.log(`[📚 聚合-stream] 聚合 ${chunks.length} 段結果 → ${totalEpisodes} 集`);
+  send({ type: 'progress', message: `開始聚合 ${totalEpisodes} 集`, batch: 0, totalBatches: 0 });
+
+  try {
+    const BATCH_SIZE = 27;
+    const batchCount = Math.ceil(totalEpisodes / BATCH_SIZE);
+    const chunksStr = chunks.map((chunk, index) => `[段落${index + 1}]\n${chunk}`).join('\n\n');
+    const maxChunkTextPerBatch = 16000;
+
+    send({ type: 'progress', message: `分 ${batchCount} 批並行調用模型`, batch: 0, totalBatches: batchCount });
+
+    // 构造所有 batch promise，每批完成时推送进度
+    let completedBatches = 0;
+    const batchPromises = [];
+
+    for (let b = 0; b < batchCount; b++) {
+      const batchStart = b * BATCH_SIZE;
+      const batchEnd = Math.min(totalEpisodes, (b + 1) * BATCH_SIZE);
+      const batchEpStart = `E${String(batchStart + 1).padStart(3, '0')}`;
+      const batchEpEnd = `E${String(batchEnd).padStart(3, '0')}`;
+      const batchSegments = segments.slice(batchStart, batchEnd);
+      const batchSourceIndex = batchSegments.map((seg, i) => {
+        const epId = `E${String(batchStart + i + 1).padStart(3, '0')}`;
+        return `${epId},${seg.startLine}-${seg.endLine},${(seg.title || '').replace(/,/g, ' ')}`;
+      }).join('\n');
+
+      const batchSystemPrompt = `你是番劇策劃專家。根據分段分析結果，規劃第 ${batchEpStart}-${batchEpEnd} 集的大綱。
+
+## 思考過程
+先在 <thinking>...</thinking> 標籤內簡要分析（200字以內）：原著核心衝突、本批次劇情節奏、關鍵轉折點。然後直接輸出 CSV。
+
+## 要求
+- 本批次輸出 ${batchEnd - batchStart} 集（${batchEpStart}-${batchEpEnd}）
+- 每集3-8分鐘
+- 包含起承轉合節奏
+- 每集有明確的戲劇鉤子
+- source_range 只能使用我提供的 SOURCE RANGE INDEX，禁止自行改寫行號
+- 不能新增主線人物 / 組織 / 核心陰謀
+- 輸出必須是 CSV 純文本，不要 Markdown、不要 JSON、不要解釋
+
+## CSV表頭（必須一字不差）
+${BREAKDOWN_CSV_HEADER}
+
+## CSV規則
+- 必須輸出 ${batchEnd - batchStart} 行（${batchEpStart}-${batchEpEnd}）
+- 每行 11 欄都要填滿，禁止空欄
+- scene_list：用分號;分隔 3-6 個場景，使用 slugline 風格
+- characters / must_keep / no_add：用分號;分隔多項
+  - source_range 必須逐行對應 SOURCE RANGE INDEX
+  - 語言跟隨原文語言`;
+
+      const batchUserMessage = `TITLE: ${title || '未命名'}
+
+SOURCE RANGE INDEX for ${batchEpStart}-${batchEpEnd} (ep_id,source_range,segment_title)
+${batchSourceIndex}
+
+CHUNK ANALYSES
+${chunksStr.substring(0, maxChunkTextPerBatch)}`;
+
+      console.log(`[📚 聚合-stream] 發起 batch ${b + 1}/${batchCount}: ${batchEpStart}-${batchEpEnd}`);
+      batchPromises.push(
+        (async () => {
+          try {
+            const result = await callClaudeWithStreaming(
+              batchSystemPrompt, batchUserMessage, 'aggregate',
+              { maxTokens: 8192 },
+              {
+                onThinking: (chunk) => send({ type: 'batch_thinking', batch: b + 1, content: chunk }),
+                onContent: (chunk) => send({ type: 'batch_content', batch: b + 1, content: chunk })
+              }
+            );
+            completedBatches++;
+            const csv = extractBreakdownCsv(result.text, batchEnd - batchStart);
+            if (csv) {
+              send({ type: 'batch_done', batch: b + 1, totalBatches: batchCount, episodes: batchEnd - batchStart, status: 'ok' });
+              return csv;
+            }
+            const payload = extractJsonPayload(result.text);
+            if (payload) {
+              const converted = buildAggregateCsvFromJson(payload, batchSegments, batchEnd - batchStart);
+              send({ type: 'batch_done', batch: b + 1, totalBatches: batchCount, episodes: batchEnd - batchStart, status: 'ok_converted' });
+              return converted;
+            }
+            send({ type: 'batch_done', batch: b + 1, totalBatches: batchCount, episodes: 0, status: 'parse_failed' });
+            return null;
+          } catch (streamErr) {
+            // Fallback to non-streaming callClaude on stream failure
+            console.warn(`[📚 聚合-stream] batch ${b + 1} 流式失敗，fallback 到非流式:`, streamErr.message);
+            try {
+              const fallbackResult = await callClaude(batchSystemPrompt, batchUserMessage, 'aggregate');
+              completedBatches++;
+              const csv = extractBreakdownCsv(fallbackResult.text, batchEnd - batchStart);
+              if (csv) {
+                send({ type: 'batch_done', batch: b + 1, totalBatches: batchCount, episodes: batchEnd - batchStart, status: 'ok_fallback' });
+                return csv;
+              }
+              send({ type: 'batch_done', batch: b + 1, totalBatches: batchCount, episodes: 0, status: 'parse_failed' });
+              return null;
+            } catch (fallbackErr) {
+              completedBatches++;
+              console.error(`[📚 聚合-stream] batch ${b + 1} fallback 也失敗:`, fallbackErr.message);
+              send({ type: 'batch_done', batch: b + 1, totalBatches: batchCount, episodes: 0, status: 'error', error: fallbackErr.message });
+              return null;
+            }
+          }
+        })()
+      );
+    }
+
+    // 心跳 keep-alive（每 15 秒）
+    const heartbeat = setInterval(() => {
+      send({ type: 'heartbeat', completed: completedBatches, total: batchCount });
+    }, 15000);
+
+    const batchResults = await Promise.all(batchPromises);
+    clearInterval(heartbeat);
+
+    // --- 合并批次 CSV ---
+    const mergedRows = [BREAKDOWN_CSV_HEADER];
+    const coveredEpisodes = new Set();
+
+    for (const batchCsv of batchResults) {
+      if (!batchCsv) continue;
+      const lines = batchCsv.split('\n');
+      for (const line of lines) {
+        if (line === BREAKDOWN_CSV_HEADER) continue;
+        const epMatch = line.match(/^(E\d{3})/);
+        if (epMatch && !coveredEpisodes.has(epMatch[1])) {
+          coveredEpisodes.add(epMatch[1]);
+          mergedRows.push(line);
+        }
+      }
+    }
+
+    send({ type: 'progress', message: `模型產出 ${coveredEpisodes.size}/${totalEpisodes} 集`, batch: batchCount, totalBatches: batchCount });
+
+    // --- 补齐缺失集数 ---
+    if (coveredEpisodes.size < totalEpisodes) {
+      send({ type: 'progress', message: `補齊缺失的 ${totalEpisodes - coveredEpisodes.size} 集` });
+      const fallbackCsv = buildAggregateCsvFromChunkResults(chunks, segments, novelText || '', Number(chunkSize) || 100000);
+      if (fallbackCsv) {
+        const fallbackLines = fallbackCsv.split('\n');
+        for (const line of fallbackLines) {
+          if (line === BREAKDOWN_CSV_HEADER) continue;
+          const epMatch = line.match(/^(E\d{3})/);
+          if (epMatch && !coveredEpisodes.has(epMatch[1])) {
+            coveredEpisodes.add(epMatch[1]);
+            mergedRows.push(line);
+          }
+        }
+      }
+    }
+
+    // --- 排序 ---
+    const header = mergedRows[0];
+    const dataRows = mergedRows.slice(1).sort((a, b) => {
+      const aId = a.match(/^E(\d{3})/);
+      const bId = b.match(/^E(\d{3})/);
+      return (aId ? parseInt(aId[1]) : 0) - (bId ? parseInt(bId[1]) : 0);
+    });
+
+    const finalCsv = [header, ...dataRows].join('\n');
+    console.log(`[📚 聚合-stream] 最終 CSV: ${dataRows.length}/${totalEpisodes} 集`);
+
+    send({ type: 'done', result: finalCsv, episodes: dataRows.length, targetEpisodes: totalEpisodes });
+    res.end();
+  } catch (err) {
+    send({ type: 'error', error: err.message });
+    res.end();
   }
 });
 
