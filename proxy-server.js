@@ -346,7 +346,62 @@ function buildSourceRanges(text, target = 80) {
   return segments;
 }
 
-const BREAKDOWN_CSV_HEADER = 'ep_id,arc_block,source_range';
+const BREAKDOWN_CSV_HEADER = 'ep_id,arc_block,source_range,source_text';
+const BREAKDOWN_MODEL_HEADER = 'ep_id,arc_block,source_range'; // 模型只输出3列，source_text由服务端注入
+
+/**
+ * 将原文按 buildSourceRanges 的分行逻辑重新切分为行数组。
+ * 与 buildSourceRanges 内部的分行逻辑保持一致。
+ */
+function splitNovelToLines(text) {
+  let rawText = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  let lines = rawText.split('\n');
+  if (lines.length < 160) {
+    rawText = rawText
+      .replace(/([。！？!?])\s*/g, '$1\n')
+      .replace(/(\.)\s+(?=[A-Z\u4e00-\u9fff])/g, '$1\n')
+      .replace(/\s{2,}/g, '\n')
+      .replace(/((?:INT|EXT|内景|外景|镜头切至)[.．：:].+)/g, '\n$1\n');
+    lines = rawText.split('\n').filter(l => l.trim().length > 0);
+  }
+  return lines;
+}
+
+/**
+ * 给已完成的 breakdown CSV 注入 source_text 列。
+ * 如果模型已输出 source_text 则保留，否则从原文按行号提取。
+ */
+function injectSourceText(csv, novelText) {
+  if (!csv || !novelText) return csv;
+  const novelLines = splitNovelToLines(novelText);
+  const csvLines = csv.split('\n');
+  if (csvLines.length < 2) return csv;
+
+  const header = csvLines[0];
+  const hasSourceText = header.includes('source_text');
+  const result = [BREAKDOWN_CSV_HEADER];
+
+  for (let i = 1; i < csvLines.length; i++) {
+    const line = csvLines[i].trim();
+    if (!line) continue;
+    // 解析 CSV 行（简单 split，source_text 可能带引号）
+    const match = line.match(/^(E\d{3}),([^,]*),(\d+-\d+)/);
+    if (!match) { result.push(line); continue; }
+
+    const epId = match[1];
+    const arcBlock = match[2];
+    const rangeStr = match[3];
+    const [startLine, endLine] = rangeStr.split('-').map(Number);
+
+    // 提取原文（行号是 1-indexed）
+    const extractedLines = novelLines.slice(startLine - 1, endLine);
+    const sourceText = extractedLines.join('\n').trim();
+
+    result.push([epId, arcBlock, rangeStr, csvEscape(sourceText)].join(','));
+  }
+
+  return result.join('\n');
+}
 
 function csvEscape(value) {
   const text = String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
@@ -393,7 +448,7 @@ function extractBreakdownCsv(text, targetEpisodes) {
     .map(line => line.trim())
     .filter(Boolean);
 
-  const headerIndex = lines.findIndex(line => line === BREAKDOWN_CSV_HEADER);
+  const headerIndex = lines.findIndex(line => line === BREAKDOWN_MODEL_HEADER || line === BREAKDOWN_CSV_HEADER);
   if (headerIndex === -1) return '';
 
   const endIndex = Math.min(lines.length, headerIndex + targetEpisodes + 1);
@@ -3072,7 +3127,7 @@ app.post('/api/novel/aggregate', async (req, res) => {
 - 輸出必須是 CSV 純文本，不要 Markdown、不要 JSON、不要解釋
 
 ## CSV表頭（必須一字不差）
-${BREAKDOWN_CSV_HEADER}
+${BREAKDOWN_MODEL_HEADER}
 
 ## CSV規則
 - 必須輸出 ${batchEnd - batchStart} 行（${batchEpStart}-${batchEpEnd}）
@@ -3118,7 +3173,7 @@ ${chunksStr.substring(0, maxChunkTextPerBatch)}`;
       if (!batchCsv) continue;
       const lines = batchCsv.split('\n');
       for (const line of lines) {
-        if (line === BREAKDOWN_CSV_HEADER) continue;
+        if (line === BREAKDOWN_CSV_HEADER || line === BREAKDOWN_MODEL_HEADER) continue;
         const epMatch = line.match(/^(E\d{3})/);
         if (epMatch && !coveredEpisodes.has(epMatch[1])) {
           coveredEpisodes.add(epMatch[1]);
@@ -3136,7 +3191,7 @@ ${chunksStr.substring(0, maxChunkTextPerBatch)}`;
       if (fallbackCsv) {
         const fallbackLines = fallbackCsv.split('\n');
         for (const line of fallbackLines) {
-          if (line === BREAKDOWN_CSV_HEADER) continue;
+          if (line === BREAKDOWN_CSV_HEADER || line === BREAKDOWN_MODEL_HEADER) continue;
           const epMatch = line.match(/^(E\d{3})/);
           if (epMatch && !coveredEpisodes.has(epMatch[1])) {
             coveredEpisodes.add(epMatch[1]);
@@ -3169,7 +3224,7 @@ ${chunksStr.substring(0, maxChunkTextPerBatch)}`;
       console.warn(`[📚 聚合] ⚠️ 最終只有 ${finalRowCount} 集，目標 ${totalEpisodes} 集`);
     }
 
-    res.json({ result: finalCsv });
+    res.json({ result: injectSourceText(finalCsv, novelText) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3241,7 +3296,7 @@ app.post('/api/novel/aggregate-stream', async (req, res) => {
 - 輸出必須是 CSV 純文本，不要 Markdown、不要 JSON、不要解釋
 
 ## CSV表頭（必須一字不差）
-${BREAKDOWN_CSV_HEADER}
+${BREAKDOWN_MODEL_HEADER}
 
 ## CSV規則
 - 必須輸出 ${batchEnd - batchStart} 行（${batchEpStart}-${batchEpEnd}）
@@ -3324,7 +3379,7 @@ ${chunksStr.substring(0, maxChunkTextPerBatch)}`;
       if (!batchCsv) continue;
       const lines = batchCsv.split('\n');
       for (const line of lines) {
-        if (line === BREAKDOWN_CSV_HEADER) continue;
+        if (line === BREAKDOWN_CSV_HEADER || line === BREAKDOWN_MODEL_HEADER) continue;
         const epMatch = line.match(/^(E\d{3})/);
         if (epMatch && !coveredEpisodes.has(epMatch[1])) {
           coveredEpisodes.add(epMatch[1]);
@@ -3342,7 +3397,7 @@ ${chunksStr.substring(0, maxChunkTextPerBatch)}`;
       if (fallbackCsv) {
         const fallbackLines = fallbackCsv.split('\n');
         for (const line of fallbackLines) {
-          if (line === BREAKDOWN_CSV_HEADER) continue;
+          if (line === BREAKDOWN_CSV_HEADER || line === BREAKDOWN_MODEL_HEADER) continue;
           const epMatch = line.match(/^(E\d{3})/);
           if (epMatch && !coveredEpisodes.has(epMatch[1])) {
             coveredEpisodes.add(epMatch[1]);
@@ -3363,7 +3418,7 @@ ${chunksStr.substring(0, maxChunkTextPerBatch)}`;
     const finalCsv = [header, ...dataRows].join('\n');
     console.log(`[📚 聚合-stream] 最終 CSV: ${dataRows.length}/${totalEpisodes} 集`);
 
-    send({ type: 'done', result: finalCsv, episodes: dataRows.length, targetEpisodes: totalEpisodes });
+    send({ type: 'done', result: injectSourceText(finalCsv, novelText), episodes: dataRows.length, targetEpisodes: totalEpisodes });
     res.end();
   } catch (err) {
     send({ type: 'error', error: err.message });

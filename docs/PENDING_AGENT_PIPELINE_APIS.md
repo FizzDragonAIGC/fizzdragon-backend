@@ -189,7 +189,7 @@ data: {"type":"done","fullText":"{\"meta\":{},\"characters\":[]}","fullThinking"
 
 ```json
 {
-  "result": "ep_id,arc_block,source_range\nE001,A1,8-28\nE002,A1,29-54\n...",
+  "result": "ep_id,arc_block,source_range,source_text\nE001,A1,8-28,\"杰克坐在轮椅上...\"\nE002,A1,29-54,\"酒吧场景...\"",
   "reasoning": null,
   "tokens": {
     "input": 2000,
@@ -205,14 +205,15 @@ data: {"type":"done","fullText":"{\"meta\":{},\"characters\":[]}","fullThinking"
 预期 CSV 表头：
 
 ```text
-ep_id,arc_block,source_range
+ep_id,arc_block,source_range,source_text
 ```
 
 | 字段 | 说明 |
 | --- | --- |
 | `ep_id` | 集号，格式 `E001`-`E080` |
 | `arc_block` | 故事弧段标记，如 `A1`、`A2`、`B1`、`C1` 等，相邻集属同一弧段时使用相同标记 |
-| `source_range` | 原文行号范围，如 `8-28`，后续编剧步骤根据此范围提取原文进行改编 |
+| `source_range` | 原文行号范围，如 `8-28` |
+| `source_text` | 从原文按 source_range 提取的实际文本内容（服务端自动注入，非模型输出） |
 
 ### `POST /api/pipeline/breakdown/stream`
 
@@ -229,7 +230,7 @@ ep_id,arc_block,source_range
 ```text
 data: {"type":"thinking","content":"..."}
 data: {"type":"chunk","content":"ep_id,arc_block,source_range\nE001,A1,8-28"}
-data: {"type":"done","fullText":"ep_id,arc_block,source_range\nE001,A1,8-28\n...","fullThinking":"...","tokens":{"input":2000,"output":1200}}
+data: {"type":"done","fullText":"ep_id,arc_block,source_range,source_text\nE001,A1,8-28,\"原文内容...\"\n...","fullThinking":"...","tokens":{"input":2000,"output":1200}}
 ```
 
 ---
@@ -661,7 +662,7 @@ data: {"type":"heartbeat"}
 
 ```json
 {
-  "result": "ep_id,arc_block,source_range\nE001,A1,8-28\nE002,A1,29-54\n..."
+  "result": "ep_id,arc_block,source_range,source_text\nE001,A1,8-28,\"杰克坐在轮椅上...\"\n..."
 }
 ```
 
@@ -724,7 +725,7 @@ data: {"type":"batch_done","batch":1,"totalBatches":3,"episodes":27,"status":"ok
 data: {"type":"batch_done","batch":2,"totalBatches":3,"episodes":27,"status":"ok"}
 data: {"type":"batch_done","batch":3,"totalBatches":3,"episodes":26,"status":"ok"}
 data: {"type":"progress","message":"模型產出 80/80 集","batch":3,"totalBatches":3}
-data: {"type":"done","result":"ep_id,arc_block,source_range\nE001,A1,8-28\n...","episodes":80,"targetEpisodes":80}
+data: {"type":"done","result":"ep_id,arc_block,source_range,source_text\nE001,A1,8-28,\"原文...\"\n...","episodes":80,"targetEpisodes":80}
 ```
 
 #### 内部流程
