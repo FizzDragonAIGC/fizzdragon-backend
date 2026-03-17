@@ -189,7 +189,7 @@ data: {"type":"done","fullText":"{\"meta\":{},\"characters\":[]}","fullThinking"
 
 ```json
 {
-  "result": "ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characters,must_keep,no_add\nE001,...",
+  "result": "ep_id,arc_block,source_range\nE001,A1,8-28\nE002,A1,29-54\n...",
   "reasoning": null,
   "tokens": {
     "input": 2000,
@@ -205,8 +205,14 @@ data: {"type":"done","fullText":"{\"meta\":{},\"characters\":[]}","fullThinking"
 预期 CSV 表头：
 
 ```text
-ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characters,must_keep,no_add
+ep_id,arc_block,source_range
 ```
+
+| 字段 | 说明 |
+| --- | --- |
+| `ep_id` | 集号，格式 `E001`-`E080` |
+| `arc_block` | 故事弧段标记，如 `A1`、`A2`、`B1`、`C1` 等，相邻集属同一弧段时使用相同标记 |
+| `source_range` | 原文行号范围，如 `8-28`，后续编剧步骤根据此范围提取原文进行改编 |
 
 ### `POST /api/pipeline/breakdown/stream`
 
@@ -222,8 +228,8 @@ ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characte
 
 ```text
 data: {"type":"thinking","content":"..."}
-data: {"type":"chunk","content":"ep_id,source_range,..."}
-data: {"type":"done","fullText":"ep_id,source_range,...","fullThinking":"...","tokens":{"input":2000,"output":1200}}
+data: {"type":"chunk","content":"ep_id,arc_block,source_range\nE001,A1,8-28"}
+data: {"type":"done","fullText":"ep_id,arc_block,source_range\nE001,A1,8-28\n...","fullThinking":"...","tokens":{"input":2000,"output":1200}}
 ```
 
 ---
@@ -655,7 +661,7 @@ data: {"type":"heartbeat"}
 
 ```json
 {
-  "result": "ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characters,must_keep,no_add\nE001,10-14,..."
+  "result": "ep_id,arc_block,source_range\nE001,A1,8-28\nE002,A1,29-54\n..."
 }
 ```
 
@@ -710,16 +716,15 @@ data: {"type":"heartbeat"}
 ```text
 data: {"type":"progress","message":"開始聚合 80 集","batch":0,"totalBatches":0}
 data: {"type":"progress","message":"分 3 批並行調用模型","batch":0,"totalBatches":3}
-data: {"type":"batch_thinking","batch":1,"content":"原著核心衝突是..."}
-data: {"type":"batch_thinking","batch":2,"content":"本批次劇情節奏..."}
-data: {"type":"batch_content","batch":1,"content":"ep_id,source_range,..."}
-data: {"type":"batch_content","batch":1,"content":"E001,10-14,..."}
+data: {"type":"batch_thinking","batch":1,"content":"本批次覆蓋原文行8-637..."}
+data: {"type":"batch_content","batch":1,"content":"ep_id,arc_block,source_range\nE001,A1,8-28"}
+data: {"type":"batch_content","batch":1,"content":"\nE002,A1,29-54"}
 data: {"type":"heartbeat","completed":1,"total":3}
 data: {"type":"batch_done","batch":1,"totalBatches":3,"episodes":27,"status":"ok"}
 data: {"type":"batch_done","batch":2,"totalBatches":3,"episodes":27,"status":"ok"}
 data: {"type":"batch_done","batch":3,"totalBatches":3,"episodes":26,"status":"ok"}
 data: {"type":"progress","message":"模型產出 80/80 集","batch":3,"totalBatches":3}
-data: {"type":"done","result":"ep_id,source_range,...\nE001,...\n...","episodes":80,"targetEpisodes":80}
+data: {"type":"done","result":"ep_id,arc_block,source_range\nE001,A1,8-28\n...","episodes":80,"targetEpisodes":80}
 ```
 
 #### 内部流程

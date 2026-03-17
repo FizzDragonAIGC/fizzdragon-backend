@@ -266,27 +266,51 @@ function validateAndFixCharacters(data) {
 
 // 从小说文本构建 source_range 分段索引（用于 story_breakdown_pack）
 function buildSourceRanges(text, target = 80) {
-  const lines = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  const headRe = /^\s*(Chapter\s+\d+\s*\|.*|CHAPTER\s+\d+\s*\|.*)\s*$/i;
+  let rawText = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  // PDF 提取的文本往往行数极少（整页连成一行），先按句号/场景标记重新分行
+  let lines = rawText.split('\n');
+  if (lines.length < target * 2) {
+    // 行数不足，按中文句号、场景标记、段落分隔符重新切分
+    rawText = rawText
+      .replace(/([。！？!?])\s*/g, '$1\n')           // 中文/英文句末
+      .replace(/(\.)\s+(?=[A-Z\u4e00-\u9fff])/g, '$1\n') // 英文句号后接大写/中文
+      .replace(/\s{2,}/g, '\n')                       // 多空格当段落分隔
+      .replace(/((?:INT|EXT|内景|外景|镜头切至)[.．：:].+)/g, '\n$1\n'); // 场景标记独立成行
+    lines = rawText.split('\n').filter(l => l.trim().length > 0);
+  }
+
+  // 章节头检测（支持更多格式）
+  const headRe = /^\s*(Chapter\s+\d+\s*[\|:：].*)$/i;
+  const sceneRe = /^\s*((?:第[一二三四五六七八九十百千\d]+[章幕场景节回]|Scene\s+\d+|ACT\s+[IVX\d]+|INT\.|EXT\.|内景|外景|镜头切至)[.．：:\s].*)/i;
   const heads = [];
   for (let i = 0; i < lines.length; i++) {
-    if (headRe.test(lines[i])) heads.push({ idx: i, title: lines[i].trim() });
+    if (headRe.test(lines[i]) || sceneRe.test(lines[i])) {
+      heads.push({ idx: i, title: lines[i].trim().slice(0, 80) });
+    }
   }
+
   const segments = [];
-  if (heads.length === 0) {
+  if (heads.length >= target / 2) {
+    // 有足够的章节/场景头，按头切分
+    for (let h = 0; h < heads.length; h++) {
+      const start = heads[h].idx;
+      const end = (h === heads.length - 1) ? (lines.length - 1) : (heads[h + 1].idx - 1);
+      segments.push({ startLine: start + 1, endLine: end + 1, title: heads[h].title });
+    }
+  } else {
+    // 无头或太少，按行数均分
     const per = Math.max(1, Math.floor(lines.length / target));
     for (let e = 0; e < target; e++) {
       const start = e * per;
       const end = (e === target - 1) ? (lines.length - 1) : Math.min(lines.length - 1, (e + 1) * per - 1);
-      segments.push({ startLine: start + 1, endLine: end + 1, title: `Segment ${e + 1}` });
+      if (start >= lines.length) break;
+      const preview = lines[start].trim().slice(0, 60);
+      segments.push({ startLine: start + 1, endLine: end + 1, title: preview || `Segment ${e + 1}` });
     }
-    return segments;
   }
-  for (let h = 0; h < heads.length; h++) {
-    const start = heads[h].idx;
-    const end = (h === heads.length - 1) ? (lines.length - 1) : (heads[h + 1].idx - 1);
-    segments.push({ startLine: start + 1, endLine: end + 1, title: heads[h].title });
-  }
+
+  // 合并过多的 segments
   while (segments.length > target) {
     let minI = 0, minLen = Infinity;
     for (let i = 0; i < segments.length; i++) {
@@ -305,6 +329,7 @@ function buildSourceRanges(text, target = 80) {
     segments.splice(Math.max(i, j), 1);
     segments.splice(Math.min(i, j), 1, merged);
   }
+  // 拆分不够的 segments
   while (segments.length < target) {
     let maxI = 0, maxLen = -1;
     for (let i = 0; i < segments.length; i++) {
@@ -312,6 +337,7 @@ function buildSourceRanges(text, target = 80) {
       if (len > maxLen) { maxLen = len; maxI = i; }
     }
     const seg = segments[maxI];
+    if (seg.endLine <= seg.startLine) break; // 无法再拆
     const mid = Math.floor((seg.startLine + seg.endLine) / 2);
     const left = { startLine: seg.startLine, endLine: mid, title: seg.title + ' (A)' };
     const right = { startLine: mid + 1, endLine: seg.endLine, title: seg.title + ' (B)' };
@@ -320,7 +346,7 @@ function buildSourceRanges(text, target = 80) {
   return segments;
 }
 
-const BREAKDOWN_CSV_HEADER = 'ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characters,must_keep,no_add';
+const BREAKDOWN_CSV_HEADER = 'ep_id,arc_block,source_range';
 
 function csvEscape(value) {
   const text = String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
@@ -390,44 +416,12 @@ function buildAggregateCsvFromJson(payload, segments, targetEpisodes) {
     const episode = episodes[i] || {};
     const segment = segments[i] || { startLine: 1, endLine: 1 };
     const epId = `E${String(i + 1).padStart(3, '0')}`;
-    const scenes = Array.isArray(episode.scenes)
-      ? episode.scenes.filter(Boolean)
-      : String(episode.scenes || '')
-        .split(/[;；\n]+/)
-        .map(item => item.trim())
-        .filter(Boolean);
-    const characters = Array.isArray(episode.characters)
-      ? episode.characters.filter(Boolean)
-      : String(episode.characters || '')
-        .split(/[;；,，/]+/)
-        .map(item => item.trim())
-        .filter(Boolean);
-    const summary = String(episode.summary || episode.one_line_plot || episode.title || '').trim();
-    const summaryParts = splitSummaryParts(summary);
-    const setup = String(episode.setup || summaryParts[0] || episode.title || summary).trim();
-    const development = String(episode.development || summaryParts[1] || summary || setup).trim();
-    const turn = String(episode.turn || summaryParts[2] || episode.hook || scenes.at(-1) || development).trim();
-    const hook = String(episode.hook || turn || development).trim();
-    const oneLinePlot = String(episode.one_line_plot || summary || `${episode.title || epId}: ${hook}`).trim();
-    const mustKeep = Array.isArray(episode.must_keep)
-      ? episode.must_keep.filter(Boolean)
-      : [summary || oneLinePlot, scenes[0] || hook].filter(Boolean);
-    const noAdd = Array.isArray(episode.no_add)
-      ? episode.no_add.filter(Boolean)
-      : ['Do not add new major characters', 'Do not add new core conspiracies'];
+    const arcBlock = String(episode.arc_block || episode.arc || `A${Math.floor(i / 10) + 1}`).trim();
 
     rows.push([
       epId,
-      `${segment.startLine}-${segment.endLine}`,
-      oneLinePlot,
-      setup,
-      development,
-      turn,
-      hook,
-      scenes.join('; '),
-      characters.join('; '),
-      mustKeep.join('; '),
-      noAdd.join('; ')
+      arcBlock,
+      `${segment.startLine}-${segment.endLine}`
     ].map(csvEscape).join(','));
   }
 
@@ -600,28 +594,12 @@ function buildAggregateCsvFromChunkResults(chunks, segments, novelText, chunkSiz
     const localTotalLines = Math.max(1, chunkRange.endLine - chunkRange.startLine + 1);
     const sourceRow = findBestChunkRow(chunkTable.rows, localMidLine, localTotalLines) || {};
 
-    const oneLinePlot = sourceRow.one_line_plot || sourceRow.setup || sourceRow.development || sourceRow.turn || sourceRow.hook || '';
-    const setup = sourceRow.setup || oneLinePlot || sourceRow.development || '';
-    const development = sourceRow.development || oneLinePlot || setup || '';
-    const turn = sourceRow.turn || sourceRow.hook || development || '';
-    const hook = sourceRow.hook || turn || development || '';
-    const sceneList = sourceRow.scene_list || '';
-    const characters = sourceRow.characters || '';
-    const mustKeep = sourceRow.must_keep || [oneLinePlot, hook].filter(Boolean).join('; ');
-    const noAdd = sourceRow.no_add || 'Do not add new major characters; Do not add new core conspiracies';
+    const arcBlock = sourceRow.arc_block || `A${Math.floor(index / 10) + 1}`;
 
     rows.push([
       epId,
-      `${segment.startLine}-${segment.endLine}`,
-      oneLinePlot,
-      setup,
-      development,
-      turn,
-      hook,
-      sceneList,
-      characters,
-      mustKeep,
-      noAdd
+      arcBlock,
+      `${segment.startLine}-${segment.endLine}`
     ].map(csvEscape).join(','));
   }
 
@@ -3085,15 +3063,12 @@ app.post('/api/novel/aggregate', async (req, res) => {
       const batchSystemPrompt = `你是番劇策劃專家。根據分段分析結果，規劃第 ${batchEpStart}-${batchEpEnd} 集的大綱。
 
 ## 思考過程
-先在 <thinking>...</thinking> 標籤內簡要分析（200字以內）：原著核心衝突、本批次劇情節奏、關鍵轉折點。然後直接輸出 CSV。
+先在 <thinking>...</thinking> 標籤內簡要分析（200字以內）：本批次覆蓋的原文段落核心內容、如何切分為合理的劇集單元。然後直接輸出 CSV。
 
 ## 要求
 - 本批次輸出 ${batchEnd - batchStart} 集（${batchEpStart}-${batchEpEnd}）
-- 每集3-8分鐘
-- 包含起承轉合節奏
-- 每集有明確的戲劇鉤子
-- source_range 只能使用我提供的 SOURCE RANGE INDEX，禁止自行改寫行號
-- 不能新增主線人物 / 組織 / 核心陰謀
+- source_range 只能使用我提供的 SOURCE RANGE INDEX 中的行號，禁止自行改寫
+- arc_block 按故事弧段劃分（如 A1、A2、B1、B2、C1 等）
 - 輸出必須是 CSV 純文本，不要 Markdown、不要 JSON、不要解釋
 
 ## CSV表頭（必須一字不差）
@@ -3101,11 +3076,10 @@ ${BREAKDOWN_CSV_HEADER}
 
 ## CSV規則
 - 必須輸出 ${batchEnd - batchStart} 行（${batchEpStart}-${batchEpEnd}）
-- 每行 11 欄都要填滿，禁止空欄
-- scene_list：用分號;分隔 3-6 個場景，使用 slugline 風格
-- characters / must_keep / no_add：用分號;分隔多項
-  - source_range 必須逐行對應 SOURCE RANGE INDEX
-  - 語言跟隨原文語言`;
+- 每行 3 欄都要填滿，禁止空欄
+- source_range 必須逐行對應 SOURCE RANGE INDEX
+- arc_block 相鄰集數如屬同一故事弧段，使用相同標記
+- 語言跟隨原文語言`;
 
       const batchUserMessage = `TITLE: ${title || '未命名'}
 
@@ -3258,15 +3232,12 @@ app.post('/api/novel/aggregate-stream', async (req, res) => {
       const batchSystemPrompt = `你是番劇策劃專家。根據分段分析結果，規劃第 ${batchEpStart}-${batchEpEnd} 集的大綱。
 
 ## 思考過程
-先在 <thinking>...</thinking> 標籤內簡要分析（200字以內）：原著核心衝突、本批次劇情節奏、關鍵轉折點。然後直接輸出 CSV。
+先在 <thinking>...</thinking> 標籤內簡要分析（200字以內）：本批次覆蓋的原文段落核心內容、如何切分為合理的劇集單元。然後直接輸出 CSV。
 
 ## 要求
 - 本批次輸出 ${batchEnd - batchStart} 集（${batchEpStart}-${batchEpEnd}）
-- 每集3-8分鐘
-- 包含起承轉合節奏
-- 每集有明確的戲劇鉤子
-- source_range 只能使用我提供的 SOURCE RANGE INDEX，禁止自行改寫行號
-- 不能新增主線人物 / 組織 / 核心陰謀
+- source_range 只能使用我提供的 SOURCE RANGE INDEX 中的行號，禁止自行改寫
+- arc_block 按故事弧段劃分（如 A1、A2、B1、B2、C1 等）
 - 輸出必須是 CSV 純文本，不要 Markdown、不要 JSON、不要解釋
 
 ## CSV表頭（必須一字不差）
@@ -3274,11 +3245,10 @@ ${BREAKDOWN_CSV_HEADER}
 
 ## CSV規則
 - 必須輸出 ${batchEnd - batchStart} 行（${batchEpStart}-${batchEpEnd}）
-- 每行 11 欄都要填滿，禁止空欄
-- scene_list：用分號;分隔 3-6 個場景，使用 slugline 風格
-- characters / must_keep / no_add：用分號;分隔多項
-  - source_range 必須逐行對應 SOURCE RANGE INDEX
-  - 語言跟隨原文語言`;
+- 每行 3 欄都要填滿，禁止空欄
+- source_range 必須逐行對應 SOURCE RANGE INDEX
+- arc_block 相鄰集數如屬同一故事弧段，使用相同標記
+- 語言跟隨原文語言`;
 
       const batchUserMessage = `TITLE: ${title || '未命名'}
 
