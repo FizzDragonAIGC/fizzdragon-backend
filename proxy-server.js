@@ -4,8 +4,6 @@
 import 'dotenv/config';  // 加载.env文件
 import express from 'express';
 import cors from 'cors';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -53,8 +51,26 @@ const PROVIDERS = {
       best: 'anthropic/claude-3-opus'
     },
     pricing: { input: 0.014/1000000, output: 0.14/1000000 }
+  },
+  dashscope: {
+    name: 'Alibaba DashScope (Qwen)',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    models: {
+      fast: 'qwen-turbo',
+      standard: 'qwen-plus',
+      best: 'qwen-max'
+    },
+    pricing: { input: 0.0005/1000, output: 0.002/1000 }
   }
 };
+
+// 统一的 API key 解析
+function getApiKeyForProvider(provider) {
+  if (provider === 'dashscope') return process.env.DASHSCOPE_API_KEY || process.env.ALIYUN_API_KEY;
+  if (provider === 'anthropic') return process.env.ANTHROPIC_API_KEY;
+  if (provider === 'gemini') return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  return process.env[`${provider.toUpperCase()}_API_KEY`];
+}
 
 // 当前使用的Provider (可通过API切换)
 let currentProvider = process.env.AI_PROVIDER || 'anthropic';
@@ -807,259 +823,8 @@ app.options('*', (req, res) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(join(__dirname, '..')));
 
-// ==================== 用户认证系统（注册/登录/JWT）====================
-
-const USERS_FILE = join(__dirname, 'users.json');
+// ==================== Auth removed — all APIs are public ====================
 const userRequests = new Map(); // 用户当前请求状态
-
-// 注册
-app.post('/api/auth/register', async (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password) return res.status(400).json({ error: '缺少 username/password' });
-  if (String(username).length < 3) return res.status(400).json({ error: '用户名至少3位' });
-  if (String(password).length < 6) return res.status(400).json({ error: '密码至少6位' });
-
-  const users = loadUsers();
-  // users: { byUsername: { [username]: user } }
-  const byUsername = users.byUsername || {};
-  if (byUsername[username]) return res.status(400).json({ error: '用户名已存在' });
-
-  const passwordHash = await bcrypt.hash(password, 10);
-  const user = { id: crypto.randomUUID(), username, passwordHash, createdAt: new Date().toISOString() };
-  byUsername[username] = user;
-  users.byUsername = byUsername;
-  saveUsers(users);
-
-  const token = issueToken(user);
-  res.json({ token, user: { id: user.id, username: user.username } });
-});
-
-// 登录
-app.post('/api/auth/login', async (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password) return res.status(400).json({ error: '缺少 username/password' });
-
-  const users = loadUsers();
-  const user = users.byUsername?.[username];
-  if (!user) return res.status(400).json({ error: '用户名或密码错误' });
-
-  const ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok) return res.status(400).json({ error: '用户名或密码错误' });
-
-  const token = issueToken(user);
-  res.json({ token, user: { id: user.id, username: user.username } });
-});
-
-// 验证
-app.get('/api/auth/me', requireAuth, (req, res) => {
-  res.json({ user: { id: req.user.id, username: req.user.username } });
-});
-
-// 兼容旧前端：verify/logout
-app.get('/api/auth/verify', requireAuth, (req, res) => {
-  res.json({ ok: true, user: { id: req.user.id, username: req.user.username } });
-});
-app.post('/api/auth/logout', (req, res) => {
-  // JWT无服务端会话，前端清token即可
-  res.json({ ok: true });
-});
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
-if (!process.env.JWT_SECRET) {
-  console.warn('⚠️ JWT_SECRET 未配置：当前为临时密钥（重启会使登录失效）。请在Render环境变量中设置 JWT_SECRET');
-}
-
-function issueToken(user) {
-  return jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30d' });
-}
-
-function requireAuth(req, res, next) {
-  try {
-    const auth = req.headers.authorization || '';
-    const m = auth.match(/^Bearer\s+(.+)$/i);
-    if (!m) return res.status(401).json({ error: 'Unauthorized' });
-    const payload = jwt.verify(m[1], JWT_SECRET);
-    req.user = payload;
-    return next();
-  } catch (e) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-}
-
-// 读取用户数据
-function loadUsers() {
-  try {
-    if (existsSync(USERS_FILE)) {
-      return JSON.parse(readFileSync(USERS_FILE, 'utf-8'));
-    }
-  } catch (e) {}
-  return {};
-}
-
-// 保存用户数据
-function saveUsers(users) {
-  writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-}
-
-// 生成token
-function generateToken() {
-  return crypto.randomBytes(32).toString('hex');
-}
-
-// 哈希密码
-function hashPassword(password) {
-  return crypto.createHash('sha256').update(password + 'fizzdragon_salt').digest('hex');
-}
-
-// 验证token中间件
-function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: '未登录' });
-  }
-  
-  const token = authHeader.split(' ')[1];
-  const users = loadUsers();
-  const user = Object.values(users).find(u => u.token === token);
-  
-  if (!user) {
-    return res.status(401).json({ error: 'Token无效' });
-  }
-  
-  req.user = user;
-  next();
-}
-
-// 注册
-app.post('/api/auth/register', (req, res) => {
-  const { username, password } = req.body;
-  
-  if (!username || !password) {
-    return res.status(400).json({ error: '用户名和密码必填' });
-  }
-  
-  if (username.length < 3 || username.length > 20) {
-    return res.status(400).json({ error: '用户名3-20个字符' });
-  }
-  
-  if (password.length < 6) {
-    return res.status(400).json({ error: '密码至少6个字符' });
-  }
-  
-  const users = loadUsers();
-  
-  if (users[username]) {
-    return res.status(400).json({ error: '用户名已存在' });
-  }
-  
-  users[username] = {
-    username,
-    password: hashPassword(password),
-    createdAt: new Date().toISOString(),
-    token: null
-  };
-  
-  saveUsers(users);
-  console.log(`[Auth] 新用户注册: ${username}`);
-  res.json({ ok: true, message: '注册成功' });
-});
-
-// 登录
-app.post('/api/auth/login', (req, res) => {
-  const { username, password } = req.body;
-  
-  if (!username || !password) {
-    return res.status(400).json({ error: '用户名和密码必填' });
-  }
-  
-  const users = loadUsers();
-  const user = users[username];
-  
-  if (!user || user.password !== hashPassword(password)) {
-    return res.status(401).json({ error: '用户名或密码错误' });
-  }
-  
-  // 生成新token
-  const token = generateToken();
-  users[username].token = token;
-  users[username].lastLogin = new Date().toISOString();
-  saveUsers(users);
-  
-  console.log(`[Auth] 用户登录: ${username}`);
-  res.json({
-    ok: true,
-    token,
-    user: { username, createdAt: user.createdAt }
-  });
-});
-
-// 验证token
-app.get('/api/auth/verify', (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: '未登录' });
-  }
-  
-  const token = authHeader.split(' ')[1];
-  const users = loadUsers();
-  const user = Object.values(users).find(u => u.token === token);
-  
-  if (!user) {
-    return res.status(401).json({ error: 'Token无效' });
-  }
-  
-  res.json({ ok: true, user: { username: user.username } });
-});
-
-// 登出
-app.post('/api/auth/logout', (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
-    const users = loadUsers();
-    const user = Object.values(users).find(u => u.token === token);
-    if (user) {
-      users[user.username].token = null;
-      saveUsers(users);
-      console.log(`[Auth] 用户登出: ${user.username}`);
-    }
-  }
-  res.json({ ok: true });
-});
-
-// 🔧 管理员接口：列出所有用户（不显示密码）
-app.get('/api/admin/users', (req, res) => {
-  const users = loadUsers();
-  const userList = Object.entries(users).map(([username, data]) => ({
-    username,
-    createdAt: data.createdAt || 'unknown',
-    lastLogin: data.lastLogin || 'never',
-    isOnline: !!data.token,
-    projectCount: data.projectCount || 0
-  }));
-  res.json({ 
-    total: userList.length,
-    users: userList 
-  });
-});
-
-// 🔧 管理员接口：踢出用户（清除token）
-app.post('/api/admin/kick', (req, res) => {
-  const { username } = req.body;
-  if (!username) {
-    return res.status(400).json({ error: '缺少用户名' });
-  }
-  
-  const users = loadUsers();
-  if (!users[username]) {
-    return res.status(404).json({ error: '用户不存在' });
-  }
-  
-  users[username].token = null;
-  saveUsers(users);
-  console.log(`[Admin] 踢出用户: ${username}`);
-  res.json({ ok: true, message: `已踢出用户 ${username}` });
-});
 
 // 检查用户是否有正在进行的请求
 function checkUserRequest(username) {
@@ -1230,10 +995,10 @@ async function callClaude(systemPrompt, userMessage, agentId = '', options = {})
   });
 }
 
-// 初始化Anthropic SDK
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
-});
+// 初始化Anthropic SDK（没有key时延迟到实际调用时报错，不阻塞启动）
+const anthropic = process.env.ANTHROPIC_API_KEY
+  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  : null;
 
 // ========== 🛡️ 重试机制 + Provider备份 (Bug#5永久解决方案) ==========
 const RETRY_CONFIG = {
@@ -1244,7 +1009,7 @@ const RETRY_CONFIG = {
 };
 
 // 备用Provider顺序
-const FALLBACK_PROVIDERS = ['deepseek', 'openrouter'];
+const FALLBACK_PROVIDERS = ['dashscope', 'deepseek', 'openrouter'];
 
 // 带重试的API调用包装器
 async function callWithRetry(callFn, agentId = '') {
@@ -1284,7 +1049,8 @@ async function callWithFallback(systemPrompt, userMessage, agentId = '', options
   let lastError = null;
   
   for (const provider of FALLBACK_PROVIDERS) {
-    if (!process.env[`${provider.toUpperCase()}_API_KEY`] && provider !== 'deepseek') {
+    const providerKey = getApiKeyForProvider(provider);
+    if (!providerKey) {
       continue; // 跳过没有配置key的provider
     }
     
@@ -1310,9 +1076,7 @@ async function callWithFallback(systemPrompt, userMessage, agentId = '', options
 async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '', options = {}) {
   const provider = PROVIDERS[currentProvider];
   const baseUrl = provider.baseUrl;
-  const apiKey = currentProvider === 'deepseek' 
-    ? process.env.DEEPSEEK_API_KEY 
-    : process.env.OPENROUTER_API_KEY;
+  const apiKey = getApiKeyForProvider(currentProvider);
   
   if (!apiKey) {
     throw new Error(`Missing API key for ${currentProvider}. Set ${currentProvider.toUpperCase()}_API_KEY in .env`);
@@ -1322,13 +1086,18 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
   // 🔧 分镜不再强制使用reasoner（太慢），改用普通模型+更大max_tokens
   // 前端可以指定useReasoner强制使用
   const useReasoner = options.useReasoner === true && currentProvider === 'deepseek';
-  const model = useReasoner ? 'deepseek-reasoner' : (needsLongOutput ? provider.models.standard : provider.models.fast);
-  
+
   // 分镜/小说需要更多tokens
-  // ⚠️ DeepSeek所有模型max_tokens上限都是8192！（包括reasoner）
-  // 虽然API可能接受更高值，但响应质量会下降
+  // ⚠️ DashScope qwen-long max_tokens上限6000, qwen-max上限8192
+  // DeepSeek所有模型max_tokens上限都是8192
   const longOutputAgents = ['storyboard', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner', 'format_adapter', 'aggregate', 'story_breakdown_pack'];
-  const maxTokens = longOutputAgents.includes(agentId) ? 8192 : (needsLongOutput ? 8192 : 4096);
+  const model = useReasoner ? 'deepseek-reasoner' : (longOutputAgents.includes(agentId) ? provider.models.best : provider.models.fast);
+
+  let maxTokens = longOutputAgents.includes(agentId) ? 8192 : (needsLongOutput ? 8192 : 4096);
+  // dashscope qwen-turbo/qwen-plus max_tokens上限8192
+  if (currentProvider === 'dashscope') {
+    maxTokens = Math.min(maxTokens, 8192);
+  }
   
   console.log(`Calling ${provider.name} (${agentId || 'unknown'}) model: ${model}, max_tokens: ${maxTokens}`);
   
@@ -1403,6 +1172,9 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
 
 // ========== Anthropic Claude API调用 ==========
 async function callAnthropicAPI(systemPrompt, userMessage, agentId = '', options = {}) {
+  if (!anthropic) {
+    throw new Error('ANTHROPIC_API_KEY 未配置，无法使用 Anthropic provider。请在 .env 中设置 ANTHROPIC_API_KEY 或切换 AI_PROVIDER。');
+  }
   const needsLongOutput = ['storyboard', 'narrative', 'chapters', 'concept', 'screenwriter', 'character'].includes(agentId);
   let model = 'claude-3-haiku-20240307';
   let maxTokens = 4096;
@@ -1552,6 +1324,7 @@ async function callClaudeWithStreaming(systemPrompt, userMessage, agentId, optio
 
   try {
     if (currentProvider === 'anthropic') {
+      if (!anthropic) throw new Error('ANTHROPIC_API_KEY 未配置');
       // Anthropic streaming with SDK
       const createParams = {
         model: options.model || 'claude-sonnet-4-20250514',
@@ -1589,7 +1362,7 @@ async function callClaudeWithStreaming(systemPrompt, userMessage, agentId, optio
     } else {
       // OpenAI-compatible providers (DeepSeek, OpenRouter, etc.)
       const provider = PROVIDERS[currentProvider];
-      const apiKey = process.env[`${currentProvider.toUpperCase()}_API_KEY`] || process.env.DEEPSEEK_API_KEY;
+      const apiKey = getApiKeyForProvider(currentProvider);
       const baseUrl = provider.baseUrl;
       const detector = new ThinkingStreamDetector();
 
@@ -1715,7 +1488,7 @@ app.post('/api/agent-stream/:agentId', async (req, res) => {
   
   try {
     const provider = PROVIDERS[currentProvider];
-    const apiKey = process.env[`${currentProvider.toUpperCase()}_API_KEY`];
+    const apiKey = getApiKeyForProvider(currentProvider);
     const baseUrl = provider.baseUrl;
     
     // 构建prompt
@@ -2190,7 +1963,8 @@ import { createPipelineRouter } from './pipeline/index.js';
 const pipelineRouter = createPipelineRouter({
   AGENTS, loadAgentSkills, needsJsonOutput,
   callClaude, callClaudeWithStreaming,
-  requireAuth, extractThinking, buildSourceRanges,
+  extractThinking, buildSourceRanges,
+  getApiKeyForProvider, sanitizeForJson,
   _PROVIDERS: PROVIDERS
 });
 app.use('/api/pipeline', pipelineRouter);
@@ -2200,17 +1974,32 @@ import { PIPELINE_AGENT_MAP, PIPELINE_STEPS } from './pipeline/config.js';
 import { buildPipelinePrompt } from './pipeline/services/prompt-builder.js';
 
 for (const stepId of PIPELINE_STEPS) {
-  app.post(`/api/pipeline/${stepId}/stream`, requireAuth, async (req, res) => {
+  app.post(`/api/pipeline/${stepId}/stream`, async (req, res) => {
     console.log(`[Pipeline:${stepId}/stream] Request received`);
+
+    // Auto-inject project context when projectId is provided
+    if (req.body.projectId) {
+      const userId = '_public';
+      const ctx = readProjectContext(userId, req.body.projectId);
+      if (ctx) {
+        for (const [k, v] of Object.entries(ctx)) {
+          if (req.body[k] === undefined && v != null) req.body[k] = v;
+        }
+        console.log(`[Pipeline:${stepId}/stream] Injected context keys: ${Object.keys(ctx).join(',')}`);
+      }
+    }
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.flushHeaders();
+    // Send initial SSE comment to keep connection alive during API call
+    res.write(':ok\n\n');
 
-    let closed = false;
-    req.on('close', () => { closed = true; });
-    const write = (data) => { if (!closed) try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {} };
+    const write = (data) => {
+      if (!res.writableEnded) try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {}
+    };
 
     try {
       const deps = { AGENTS, loadAgentSkills, needsJsonOutput, buildSourceRanges };
@@ -2218,9 +2007,10 @@ for (const stepId of PIPELINE_STEPS) {
       console.log(`[Pipeline:${stepId}/stream] Calling ${agentId}`);
 
       const provider = PROVIDERS[currentProvider];
-      const apiKey = process.env[`${currentProvider.toUpperCase()}_API_KEY`] || process.env.DEEPSEEK_API_KEY;
+      const apiKey = getApiKeyForProvider(currentProvider);
       const baseUrl = provider.baseUrl;
       const model = provider.models.standard;
+      console.log(`[Pipeline:${stepId}/stream] Using ${provider.name} model=${model}, prompt=${systemPrompt.length}+${userMessage.length} chars`);
 
       const apiResp = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
@@ -2235,6 +2025,7 @@ for (const stepId of PIPELINE_STEPS) {
         const errText = await apiResp.text().catch(() => '');
         throw new Error(`${provider.name} API error: ${apiResp.status} ${errText}`);
       }
+      console.log(`[Pipeline:${stepId}/stream] API response status: ${apiResp.status}`);
 
       const reader = apiResp.body.getReader();
       const decoder = new TextDecoder();
@@ -2257,11 +2048,20 @@ for (const stepId of PIPELINE_STEPS) {
         }
       }
       write({ type: 'done', fullText, fullThinking: fullThinking || null, tokens: { input: inputTokens, output: outputTokens } });
+
+      // Write back generated screenplay to project-context for cross-episode continuity
+      if (stepId === 'screenplay' && req.body.projectId && req.body.episodeIndex != null && fullText) {
+        const epIdx = req.body.episodeIndex;
+        writeProjectContext('_public', req.body.projectId, {
+          screenplays: { [epIdx]: fullText }
+        }).catch(err => console.error(`[Pipeline:screenplay/stream] Context writeback failed:`, err.message));
+        console.log(`[Pipeline:screenplay/stream] Wrote back screenplay for episode ${epIdx}`);
+      }
     } catch (err) {
       console.error(`[Pipeline:${stepId}/stream] Error:`, err.message);
       write({ type: 'error', error: err.message });
     }
-    if (!closed) res.end();
+    if (!res.writableEnded) res.end();
   });
 }
 
@@ -2669,13 +2469,7 @@ app.get(['/health', '/api/health'], async (req, res) => {
     },
     provider: currentProvider,
     providerName: provider?.name || currentProvider,
-    hasApiKey: currentProvider === 'anthropic' 
-      ? !!process.env.ANTHROPIC_API_KEY
-      : currentProvider === 'deepseek'
-        ? !!process.env.DEEPSEEK_API_KEY
-        : currentProvider === 'gemini'
-          ? !!process.env.GEMINI_API_KEY
-          : !!process.env.OPENROUTER_API_KEY,
+    hasApiKey: !!getApiKeyForProvider(currentProvider),
     availableProviders: Object.keys(PROVIDERS),
     stats: STATS,
     tokenUsage: totalTokens,
@@ -2696,13 +2490,7 @@ app.get('/api/providers', (req, res) => {
       id,
       name: p.name,
       pricing: p.pricing,
-      hasKey: id === 'anthropic' 
-        ? !!process.env.ANTHROPIC_API_KEY
-        : id === 'deepseek'
-          ? !!process.env.DEEPSEEK_API_KEY
-          : id === 'gemini'
-            ? !!process.env.GEMINI_API_KEY
-            : !!process.env.OPENROUTER_API_KEY
+      hasKey: !!getApiKeyForProvider(id)
     }))
   });
 });
@@ -2722,11 +2510,9 @@ app.post('/api/stream', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   
   const provider = PROVIDERS[currentProvider];
-  const apiKey = currentProvider === 'deepseek' 
-    ? process.env.DEEPSEEK_API_KEY
-    : process.env.ANTHROPIC_API_KEY;
-  const baseUrl = provider?.baseUrl || 'https://api.deepseek.com/v1';
-  const model = provider?.models?.best || 'deepseek-chat';
+  const apiKey = getApiKeyForProvider(currentProvider);
+  const baseUrl = provider?.baseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+  const model = provider?.models?.best || 'qwen-max';
   
   console.log(`[Stream] Starting stream with ${provider?.name}, model: ${model}`);
   
@@ -2739,7 +2525,7 @@ app.post('/api/stream', async (req, res) => {
       },
       body: JSON.stringify({
         model: model,
-        max_tokens: 64000,
+        max_tokens: currentProvider === 'dashscope' ? 8192 : 64000,
         stream: true,
         messages: [
           { role: 'system', content: systemPrompt || '你是一位專業的小說作家。' },
@@ -4005,9 +3791,9 @@ try {
   console.warn('无法创建用户项目目录:', e.message);
 }
 
-// 获取用户项目 (需要登录；后端从JWT取userId，忽略URL参数)
-app.get('/api/user-projects/:userId', requireAuth, async (req, res) => {
-  const userId = req.user.id;
+// 获取用户项目（公开，userId 从 URL 参数取）
+app.get('/api/user-projects/:userId', async (req, res) => {
+  const userId = req.params.userId || '_public';
   
   // 優先從 Supabase 讀取
   if (isSupabaseEnabled()) {
@@ -4032,9 +3818,9 @@ app.get('/api/user-projects/:userId', requireAuth, async (req, res) => {
   }
 });
 
-// 保存用户项目 (需要登录；后端从JWT取userId，忽略URL参数)
-app.post('/api/user-projects/:userId', requireAuth, async (req, res) => {
-  const userId = req.user.id;
+// 保存用户项目（公开，userId 从 URL 参数取）
+app.post('/api/user-projects/:userId', async (req, res) => {
+  const userId = req.params.userId || '_public';
   const projects = req.body;
   const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
   
@@ -4055,10 +3841,10 @@ app.post('/api/user-projects/:userId', requireAuth, async (req, res) => {
   }
 });
 
-// 同步单个项目（增量更新，需要登录；后端从JWT取userId，忽略URL参数）
-app.put('/api/user-projects/:userId/:projectId', requireAuth, async (req, res) => {
+// 同步单个项目（增量更新，公开）
+app.put('/api/user-projects/:userId/:projectId', async (req, res) => {
   const { projectId } = req.params;
-  const userId = req.user.id;
+  const userId = req.params.userId || '_public';
   const projectData = req.body;
   const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
   
@@ -4085,6 +3871,112 @@ app.put('/api/user-projects/:userId/:projectId', requireAuth, async (req, res) =
 });
 
 console.log(`💾 用户项目存储: ${useSupabase ? '☁️ Supabase + 本地' : '📁 本地存储'}`);
+
+// ========== 项目资产库 API（Asset Library） ==========
+
+import { readProjectContext, writeProjectContext } from './pipeline/services/project-context.js';
+
+/** 读取指定项目的 assetLibrary（从 user_projects 中提取） */
+function readProjectAssetLibrary(userId, projectId) {
+  const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
+  try {
+    if (!existsSync(filePath)) return null;
+    const projects = JSON.parse(readFileSync(filePath, 'utf-8'));
+    const project = projects[projectId];
+    return project?.data?.assetLibrary || project?.assetLibrary || null;
+  } catch { return null; }
+}
+
+/** 写入 assetLibrary 到项目 JSON（使用 context 层的底层存储） */
+async function writeProjectAssetLibrary(userId, projectId, assetLibrary) {
+  const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
+  let projects = {};
+  if (existsSync(filePath)) {
+    projects = JSON.parse(readFileSync(filePath, 'utf-8'));
+  }
+  if (!projects[projectId]) projects[projectId] = {};
+  if (!projects[projectId].data) projects[projectId].data = {};
+  projects[projectId].data.assetLibrary = assetLibrary;
+  writeFileSync(filePath, JSON.stringify(projects, null, 2));
+
+  if (isSupabaseEnabled()) {
+    await saveUserProject(userId, projectId, projects[projectId]);
+  }
+}
+
+// ── Project Context API（pipeline 全局状态） ──
+
+// PUT /api/projects/:projectId/context — 保存 pipeline context（merge patch）
+app.put('/api/projects/:projectId/context', async (req, res) => {
+  const { projectId } = req.params;
+  const userId = '_public';
+  const patch = req.body;
+
+  try {
+    await writeProjectContext(userId, projectId, patch);
+    console.log(`[Context] 保存 ${userId}/${projectId}, keys: ${Object.keys(patch).join(',')}`);
+    res.json({ status: 'ok' });
+  } catch (e) {
+    console.error(`[Context] 保存失败:`, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/projects/:projectId/context — 读取完整 context
+app.get('/api/projects/:projectId/context', (req, res) => {
+  const { projectId } = req.params;
+  const userId = '_public';
+  const ctx = readProjectContext(userId, projectId);
+  res.json(ctx || {});
+});
+
+// GET /api/projects/:projectId/context/:key — 读取 context 单个字段
+app.get('/api/projects/:projectId/context/:key', (req, res) => {
+  const { projectId, key } = req.params;
+  const userId = '_public';
+  const ctx = readProjectContext(userId, projectId);
+  res.json(ctx?.[key] ?? null);
+});
+
+// PUT /api/projects/:projectId/asset-library — 保存完整资产库（公开，无需认证）
+app.put('/api/projects/:projectId/asset-library', async (req, res) => {
+  const { projectId } = req.params;
+  const userId = '_public';
+  const assetLibrary = req.body;
+
+  try {
+    await writeProjectAssetLibrary(userId, projectId, assetLibrary);
+    console.log(`[AssetLibrary] 保存 ${userId}/${projectId}, keys: ${Object.keys(assetLibrary).join(',')}`);
+    res.json({ status: 'ok' });
+  } catch (e) {
+    console.error(`[AssetLibrary] 保存失败:`, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/projects/:projectId/asset-library — 读取项目资产库
+app.get('/api/projects/:projectId/asset-library', (req, res) => {
+  const { projectId } = req.params;
+  const userId = '_public';
+  const lib = readProjectAssetLibrary(userId, projectId);
+  res.json(lib || {});
+});
+
+// GET /api/projects/:projectId/characters — 只返回角色列表（供 @ 选择器用）
+app.get('/api/projects/:projectId/characters', (req, res) => {
+  const { projectId } = req.params;
+  const userId = '_public';
+  const lib = readProjectAssetLibrary(userId, projectId);
+  res.json(lib?.character_library || []);
+});
+
+// GET /api/projects/:projectId/costumes — 只返回服装列表
+app.get('/api/projects/:projectId/costumes', (req, res) => {
+  const { projectId } = req.params;
+  const userId = '_public';
+  const lib = readProjectAssetLibrary(userId, projectId);
+  res.json(lib?.costume_library || []);
+});
 
 app.listen(PORT, () => {
   const provider = PROVIDERS[currentProvider];

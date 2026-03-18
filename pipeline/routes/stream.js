@@ -1,24 +1,37 @@
 import { PIPELINE_STEPS } from '../config.js';
 import { buildPipelinePrompt } from '../services/prompt-builder.js';
+import { readProjectContext, writeProjectContext } from '../services/project-context.js';
 
 export function registerStreamRoutes(router, deps) {
-  const { requireAuth } = deps;
 
   for (const stepId of PIPELINE_STEPS) {
-    router.post(`/${stepId}/stream`, requireAuth, async (req, res) => {
+    router.post(`/${stepId}/stream`, async (req, res) => {
       console.log(`[Pipeline:${stepId}/stream] Request received, body keys: ${Object.keys(req.body).join(',')}`);
 
+      // Auto-inject project context when projectId is provided
+      if (req.body.projectId) {
+        const userId = '_public';
+        const ctx = readProjectContext(userId, req.body.projectId);
+        if (ctx) {
+          for (const [k, v] of Object.entries(ctx)) {
+            if (req.body[k] === undefined && v != null) {
+              req.body[k] = v;
+            }
+          }
+          console.log(`[Pipeline:${stepId}/stream] Injected context keys: ${Object.keys(ctx).join(',')}`);
+        }
+      }
       // SSE headers
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('Access-Control-Allow-Origin', '*');
-
-      let closed = false;
-      req.on('close', () => { closed = true; });
+      res.flushHeaders();
+      // Send initial SSE comment to keep connection alive during API call
+      res.write(':ok\n\n');
 
       const write = (data) => {
-        if (!closed) {
+        if (!res.writableEnded) {
           try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {}
         }
       };
@@ -28,7 +41,7 @@ export function registerStreamRoutes(router, deps) {
         console.log(`[Pipeline:${stepId}/stream] Calling ${agentId}, prompt length: ${systemPrompt.length + userMessage.length}`);
 
         // Determine provider
-        const currentProvider = process.env.AI_PROVIDER || 'deepseek';
+        const currentProvider = process.env.AI_PROVIDER || 'dashscope';
         const PROVIDERS = deps._PROVIDERS || null;
 
         if (currentProvider === 'anthropic' && deps.anthropic) {
@@ -59,12 +72,24 @@ export function registerStreamRoutes(router, deps) {
             output: finalMessage.usage?.output_tokens || 0
           };
           write({ type: 'done', fullText, fullThinking: fullThinking || null, tokens });
+
+          // Write back generated screenplay to project-context for cross-episode continuity
+          if (stepId === 'screenplay' && req.body.projectId && req.body.episodeIndex != null && fullText) {
+            const epIdx = req.body.episodeIndex;
+            writeProjectContext('_public', req.body.projectId, {
+              screenplays: { [epIdx]: fullText }
+            }).catch(err => console.error(`[Pipeline:screenplay/stream] Context writeback failed:`, err.message));
+            console.log(`[Pipeline:screenplay/stream] Wrote back screenplay for episode ${epIdx}`);
+          }
         } else {
           // OpenAI-compatible (DeepSeek etc.) - direct streaming
           const providerName = currentProvider.toUpperCase();
-          const apiKey = process.env[`${providerName}_API_KEY`] || process.env.DEEPSEEK_API_KEY;
-          const baseUrl = PROVIDERS?.[currentProvider]?.baseUrl || 'https://api.deepseek.com';
-          const model = PROVIDERS?.[currentProvider]?.models?.standard || 'deepseek-chat';
+          const apiKey = deps.getApiKeyForProvider ? deps.getApiKeyForProvider(currentProvider) : process.env[`${providerName}_API_KEY`];
+          const baseUrl = PROVIDERS?.[currentProvider]?.baseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+          // Use 'best' model for long-output agents (same as sync callClaude logic)
+          const longOutputAgents = ['storyboard', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner', 'aggregate', 'story_breakdown_pack'];
+          const modelTier = longOutputAgents.includes(agentId) ? 'best' : 'standard';
+          const model = PROVIDERS?.[currentProvider]?.models?.[modelTier] || PROVIDERS?.[currentProvider]?.models?.standard || 'qwen-max';
 
           console.log(`[Pipeline:${stepId}/stream] Calling ${currentProvider} (${model}), baseUrl=${baseUrl}, hasKey=${!!apiKey}`);
 
@@ -135,13 +160,22 @@ export function registerStreamRoutes(router, deps) {
           }
 
           write({ type: 'done', fullText, fullThinking: fullThinking || null, tokens: { input: inputTokens, output: outputTokens } });
+
+          // Write back generated screenplay to project-context for cross-episode continuity
+          if (stepId === 'screenplay' && req.body.projectId && req.body.episodeIndex != null && fullText) {
+            const epIdx = req.body.episodeIndex;
+            writeProjectContext('_public', req.body.projectId, {
+              screenplays: { [epIdx]: fullText }
+            }).catch(err => console.error(`[Pipeline:screenplay/stream] Context writeback failed:`, err.message));
+            console.log(`[Pipeline:screenplay/stream] Wrote back screenplay for episode ${epIdx}`);
+          }
         }
       } catch (err) {
         console.error(`[Pipeline:${stepId}/stream] Error:`, err.message);
         write({ type: 'error', error: err.message });
       }
 
-      if (!closed) res.end();
+      if (!res.writableEnded) res.end();
     });
   }
 }
