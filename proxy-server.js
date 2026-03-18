@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { execSync, spawn } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
+import { buildOpenApiSpec, buildSwaggerUiHtml } from './docs/openapi-spec.js';
 
 // ========== 多Provider配置 ==========
 const PROVIDERS = {
@@ -73,7 +74,7 @@ function getApiKeyForProvider(provider) {
 }
 
 // 当前使用的Provider (可通过API切换)
-let currentProvider = process.env.AI_PROVIDER || 'anthropic';
+let currentProvider = process.env.AI_PROVIDER || 'dashscope';
 import { AGENTS, AGENT_GROUPS, STATS } from './agents-config.js';
 
 // Skills目录路径
@@ -822,6 +823,21 @@ app.options('*', (req, res) => {
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(join(__dirname, '..')));
+
+app.get('/favicon.ico', (req, res) => {
+  res.status(204).end();
+});
+
+app.get('/openapi.json', (req, res) => {
+  const protocol = req.get('x-forwarded-proto') || req.protocol;
+  const host = req.get('host');
+  const baseUrl = host ? `${protocol}://${host}` : '';
+  res.json(buildOpenApiSpec(baseUrl));
+});
+
+app.get('/swagger', (req, res) => {
+  res.type('html').send(buildSwaggerUiHtml('/openapi.json'));
+});
 
 // ==================== Auth removed — all APIs are public ====================
 const userRequests = new Map(); // 用户当前请求状态
@@ -3494,7 +3510,7 @@ app.get('/api/project/:projectId/storyboard', (req, res) => {
     
     if (format === 'csv') {
         res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename="${project.config.title}_storyboard.csv"`);
+        res.setHeader('Content-Disposition', `attachment; filename="storyboard.csv"; filename*=UTF-8''${encodeURIComponent(project.config.title)}_storyboard.csv`);
     }
     
     res.send(result);

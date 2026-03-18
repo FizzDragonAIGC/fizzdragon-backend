@@ -27,7 +27,7 @@ This is an **AI-powered IP-to-anime production backend**. The main server (`prox
 
 | File | Role |
 |------|------|
-| `proxy-server.js` | Main Express API server: auth, routing, provider abstraction, JSON repair, streaming |
+| `proxy-server.js` | Main Express API server: routing, provider abstraction, JSON repair, streaming |
 | `agents-config.js` | 50+ agent definitions (name, group, skills[], prompt) + `AGENT_GROUPS` + `STATS` |
 | `skills/*.skill.md` | 100+ skill knowledge bases loaded at runtime and injected into agent prompts |
 | `pipeline.js` / `pipeline-full.js` | Batch processing for large multi-episode projects |
@@ -39,7 +39,6 @@ This is an **AI-powered IP-to-anime production backend**. The main server (`prox
 
 ```
 POST /api/agent/:agentId  (or /api/agent-stream/:agentId)
-  → JWT auth
   → loadAgentSkills()   # reads up to 5 .skill.md files from /skills/, cached in memory
   → build system prompt (agent.prompt + injected skill content)
   → route to provider   # anthropic | deepseek | gemini | openrouter (set via AI_PROVIDER env var)
@@ -80,7 +79,7 @@ Several agents return structured JSON. Use these helpers when adding new endpoin
 
 | Variable | Required | Notes |
 |----------|----------|-------|
-| `ANTHROPIC_API_KEY` | Yes | Claude API key |
+| `ANTHROPIC_API_KEY` | No | Claude API key (only needed if AI_PROVIDER=anthropic) |
 | `PORT` | No | Default 3001 |
 | `AI_PROVIDER` | No | `anthropic` \| `deepseek` \| `gemini` \| `openrouter` |
 | `SUPABASE_URL` | No | Falls back to local file storage |

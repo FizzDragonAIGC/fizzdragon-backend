@@ -96,16 +96,45 @@ export function buildPipelinePrompt(stepId, body, deps) {
     }
 
     case 'screenplay': {
-      const { episodeMappingRow, sourceText, characterPronouns, screenwriterMode = 'shootable_90s_pro' } = body;
+      const { episodeMappingRow, sourceText, characterPronouns,
+              episodeIndex,
+              screenwriterMode = 'shootable_90s_pro' } = body;
       if (!episodeMappingRow) throw new Error('Missing required field: episodeMappingRow');
       if (!sourceText) throw new Error('Missing required field: sourceText');
+
+      // ── Auto-build continuity fields from injected project-context ──
+      let { allEpisodePlots, previousScreenplay } = body;
+
+      // Build allEpisodePlots from breakdownRows/breakdownHeaders if not provided
+      if (!allEpisodePlots && body.breakdownRows && body.breakdownHeaders) {
+        const headers = body.breakdownHeaders;
+        const rows = body.breakdownRows;
+        const plotIdx = headers.indexOf('one_line_plot');
+        allEpisodePlots = rows.map((row, i) => {
+          const plot = plotIdx >= 0 ? row[plotIdx] : (row[1] || row[0] || '');
+          return `E${String(i + 1).padStart(3, '0')}: ${plot}`;
+        }).join('\n');
+      }
+
+      // Build previousScreenplay from screenplays map if not provided
+      if (!previousScreenplay && episodeIndex > 0 && body.screenplays) {
+        previousScreenplay = body.screenplays[episodeIndex - 1]
+          || body.screenplays[String(episodeIndex - 1)]
+          || null;
+      }
       const truncated = sourceText.length > 200000 ? sourceText.substring(0, 200000) + '\n...(已截断)' : sourceText;
 
       // Use pronouns from bible if not explicitly provided
       const effectivePronouns = characterPronouns || extractPronounsFromBible(storyBible);
 
       if (screenwriterMode === 'shootable_90s_pro') {
-        userMessage = `IMPORTANT: You are writing a SHOOTABLE shortdrama screenplay (English-only).\n\n` +
+        // Detect input language: if episodeMappingRow or sourceText contains Chinese, output in Chinese
+        const inputHasChinese = /[\u4e00-\u9fff]/.test(typeof episodeMappingRow === 'string' ? episodeMappingRow : '') || /[\u4e00-\u9fff]/.test(sourceText || '');
+        const langDirective = inputHasChinese
+          ? `【语言规则】输入内容为中文，你的全部输出必须使用中文。场景描述、画面描述、动作、对白、旁白全部用中文书写。只有格式标记（[Visual]、[SFX/Ambience]、时间码）保持英文。角色名保持原文。\n\n`
+          : `【LANGUAGE RULE】Output language MUST match the input language.\n\n`;
+
+        userMessage = `IMPORTANT: You are writing a SHOOTABLE shortdrama screenplay.\n${langDirective}` +
           `PRONOUN CANON (must obey):\n` +
           `- If context.characterPronouns is provided, you MUST follow it strictly (never misgender any character).\n` +
           `- If pronouns for a character are NOT provided, avoid gendered pronouns (he/she). Use the character's name or they/them.\n\n` +
@@ -121,8 +150,27 @@ export function buildPipelinePrompt(stepId, body, deps) {
       } else {
         userMessage = `请根据以下剧情大纲编写一集短剧剧本：\n\n剧情大纲：${typeof episodeMappingRow === 'string' ? episodeMappingRow : JSON.stringify(episodeMappingRow)}\n\n原文：\n${truncated}`;
       }
+
+      // 注入全集大纲（让 LLM 知道整体弧线）
+      if (allEpisodePlots) {
+        userMessage += `\n\nFULL SERIES OUTLINE (for arc awareness, do NOT repeat prior episodes):\n${allEpisodePlots}\n`;
+      }
+
+      // 注入全集大纲和上一集剧本时，强调语言跟随规则
+      if (previousScreenplay) {
+        const prev = previousScreenplay.length > 3000
+          ? previousScreenplay.substring(0, 3000) + '\n...(truncated)'
+          : previousScreenplay;
+        userMessage += `\n\nPREVIOUS EPISODE SCREENPLAY (maintain continuity — do NOT repeat scenes, pick up where this left off):\n${prev}\n`;
+      }
+
       // Inject bible if present
       if (storyBible) userMessage = injectBibleContext(userMessage, storyBible);
+
+      // Re-emphasize language rule at the end (critical for models that drift to English)
+      if (/[\u4e00-\u9fff]/.test(typeof episodeMappingRow === 'string' ? episodeMappingRow : '') || /[\u4e00-\u9fff]/.test(sourceText || '')) {
+        userMessage += `\n\n【再次强调语言规则】你必须用中文写剧本正文。场景描述、画面描述、动作、对白用中文。上一集剧本如果是英文，请忽略其语言，你仍然必须用中文输出。格式标记 [Visual]/[SFX/Ambience] 和时间码保持英文。`;
+      }
       break;
     }
 
@@ -147,6 +195,28 @@ export function buildPipelinePrompt(stepId, body, deps) {
       if (!screenplay) throw new Error('Missing required field: screenplay');
       const assetsContext = assets ? `\n\n可用资产：\n${typeof assets === 'string' ? assets : JSON.stringify(assets)}` : '';
       userMessage = `内容：\n${screenplay}${assetsContext}`;
+      if (storyBible) userMessage = injectBibleContext(userMessage, storyBible);
+      break;
+    }
+
+    case 'design-characters': {
+      const { screenplay, screenplays: screenplaysObj, assets, totalEpisodes = 80, episodeDuration = 60, globalDirective } = body;
+      // 优先使用 screenplaysObj（多集带ID），兼容旧的单 screenplay
+      let fullText;
+      if (screenplaysObj && typeof screenplaysObj === 'object') {
+        fullText = Object.entries(screenplaysObj)
+          .sort(([a], [b]) => Number(a) - Number(b))
+          .map(([idx, text]) => `=== E${String(Number(idx) + 1).padStart(3, '0')}: 第${Number(idx) + 1}集 ===\n${text}`)
+          .join('\n\n');
+      } else if (screenplay) {
+        fullText = screenplay;
+      } else {
+        throw new Error('Missing required field: screenplay or screenplays');
+      }
+      userMessage = `项目参数：总集数=${totalEpisodes}，每集=${episodeDuration}秒\n\n`;
+      if (globalDirective) userMessage += `总提示词：${globalDirective}\n\n`;
+      userMessage += `以下是全部剧本（含集号标记），请提取角色和服装资产库（4张表），episode_id/scene_id 必须对应标记中的集号：\n${fullText}`;
+      if (assets) userMessage += `\n\n已有基础资产：\n${typeof assets === 'string' ? assets : JSON.stringify(assets)}`;
       if (storyBible) userMessage = injectBibleContext(userMessage, storyBible);
       break;
     }

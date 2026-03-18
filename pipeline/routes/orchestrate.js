@@ -2,9 +2,10 @@ import { buildPipelinePrompt } from '../services/prompt-builder.js';
 import { createSSEWriter, startHeartbeat } from '../utils/sse.js';
 
 export function registerOrchestrateRoute(router, deps) {
-  const { requireAuth, callClaudeWithStreaming } = deps;
+  const { callClaudeWithStreaming } = deps;
+  const noopAuth = (req, res, next) => next();
 
-  router.post('/run', requireAuth, async (req, res) => {
+  router.post('/run', noopAuth, async (req, res) => {
     const writer = createSSEWriter(res, req);
     const stopHeartbeat = startHeartbeat(writer);
 

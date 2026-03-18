@@ -4,6 +4,7 @@ export const PIPELINE_AGENT_MAP = {
   'breakdown': 'story_breakdown_pack',
   'screenplay': 'screenwriter',
   'extract-assets': 'asset_extractor',
+  'design-characters': 'character_costume',
   'qc-assets': 'asset_qc_gate',
   'storyboard': 'storyboard_csv'
 };
