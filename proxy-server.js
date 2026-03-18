@@ -1079,13 +1079,13 @@ async function callWithFallback(systemPrompt, userMessage, agentId = '', options
       currentProvider = originalProvider;
       return result;
     } catch (err) {
-      console.log(`❌ ${provider} 失败 (${agentId}): ${err.message}`);
+      console.log(`❌ ${provider} 失败 (${agentId}): ${err.message || err}`);
       lastError = err;
     }
   }
-  
+
   currentProvider = originalProvider;
-  throw new Error(`所有Provider都失败了 (${agentId}): ${lastError?.message || '未知错误'}`);
+  throw new Error(`所有Provider都失败了 (${agentId}): ${lastError?.message || String(lastError) || '未知错误'}`);
 }
 
 // ========== DeepSeek/OpenRouter API调用 (OpenAI兼容) ==========
@@ -3999,5 +3999,6 @@ app.listen(PORT, () => {
   console.log(`🎬 AI番劇 Agent Server v3 (Multi-Provider)`);
   console.log(`   Port: ${PORT}`);
   console.log(`   🤖 Provider: ${provider?.name || currentProvider}`);
+  console.log(`   🔑 API Key: ${getApiKeyForProvider(currentProvider) ? '✅ 已配置' : '❌ 未找到 — 请检查 .env 中的 ' + currentProvider.toUpperCase() + '_API_KEY'}`);
   console.log(`   📊 ${STATS.totalAgents} Agents | ${STATS.totalSkills} Skills`);
 });
