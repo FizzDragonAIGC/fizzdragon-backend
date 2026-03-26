@@ -271,7 +271,7 @@ Content-Type: application/json
 |------|------|------|------|
 | `projectId` | string | 否 | 项目ID（提供时自动注入上下文） |
 | `episodeIndex` | number | **是** | 集数索引（0-based） |
-| `episodeMappingRow` | string | **是** | 分集映射行（ep_id,source_range,one_line_plot） |
+| `episodeMappingRow` | string | **是** | 分集映射行（ep_id,source_range,episode_title,one_line_plot） |
 | `sourceText` | string | **是** | 原文片段（从 breakdownRows 构建） |
 | `allEpisodePlots` | string | 自动 | 全集大纲（Part 5b 后端自动从 breakdownRows 构建） |
 | `previousScreenplay` | string | 自动 | 上一集剧本（Part 5b 后端自动从 screenplays 读取） |
@@ -282,7 +282,7 @@ Content-Type: application/json
 {
   "projectId": "avatar_full_test",
   "episodeIndex": 0,
-  "episodeMappingRow": "E001,11-191,杰克·舒利在弗吉尼亚州医院回忆过去的飞行梦，随后在城市中艰难生活。"
+  "episodeMappingRow": "E001,11-191,失翼老兵,杰克·舒利在弗吉尼亚州医院回忆过去的飞行梦，随后在城市中艰难生活。"
 }
 ```
 

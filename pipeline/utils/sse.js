@@ -9,21 +9,23 @@ export function createSSEWriter(res, req) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.flushHeaders();
 
-  let closed = false;
-  req.on('close', () => { closed = true; });
+  let clientAborted = false;
+  req.on('aborted', () => { clientAborted = true; });
+
+  const isClosed = () => clientAborted || res.writableEnded || res.destroyed;
 
   return {
     write: (data) => {
-      if (!closed) {
-        try {
-          res.cork();
-          res.write(`data: ${JSON.stringify(data)}\n\n`);
-          process.nextTick(() => res.uncork());
-        } catch { /* ignore */ }
-      }
+      if (isClosed()) return;
+      try {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+        res.flush?.();
+      } catch { /* ignore */ }
     },
-    get closed() { return closed; },
-    end: () => { if (!closed) res.end(); }
+    get closed() { return isClosed(); },
+    end: () => {
+      if (!isClosed()) res.end();
+    }
   };
 }
 

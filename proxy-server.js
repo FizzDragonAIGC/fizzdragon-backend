@@ -11,6 +11,7 @@ import { dirname, join } from 'path';
 import { execSync, spawn } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import { buildOpenApiSpec, buildSwaggerUiHtml } from './docs/openapi-spec.js';
+const ROOT_DIR = dirname(fileURLToPath(import.meta.url));
 
 // ========== 多Provider配置 ==========
 const PROVIDERS = {
@@ -58,7 +59,7 @@ const PROVIDERS = {
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     models: {
       fast: 'qwen-turbo',
-      standard: 'qwen-plus',
+      standard: 'qwen3.5-plus',
       best: 'qwen-max'
     },
     pricing: { input: 0.0005/1000, output: 0.002/1000 }
@@ -78,8 +79,7 @@ let currentProvider = process.env.AI_PROVIDER || 'dashscope';
 import { AGENTS, AGENT_GROUPS, STATS } from './agents-config.js';
 
 // Skills目录路径
-// Skills目录 - 使用本地合并版_complete
-const SKILLS_DIR = '/home/beerbear/.openclaw/workspace/ai_drama_studio_v2/workbench/v3/server/skills';
+const SKILLS_DIR = join(ROOT_DIR, 'skills');
 
 // 加载skill文件内容的缓存
 const skillCache = new Map();
@@ -137,6 +137,8 @@ function loadSkill(skillId) {
     } catch (e) {
       console.error(`Failed to load skill ${skillId}:`, e.message);
     }
+  } else {
+    console.warn(`Skill file missing: ${skillPath}`);
   }
   return null;
 }
@@ -189,6 +191,7 @@ function needsJsonOutput(agentId) {
     'pose',          // 動作
     'expression',    // 表情
     'character_costume', // 人物_服装智能体 - 资产JSON
+    'asset_extractor_repair'
   ];
   
   if (naturalLanguageAgents.includes(agentId)) {
@@ -238,6 +241,72 @@ function safeJSONParse(jsonStr, agentId = 'unknown') {
       throw e1; // 抛出原始错误
     }
   }
+}
+
+const CONTEXT_EDIT_ALLOWED_KEYS = new Set([
+  'storyBible',
+  'breakdownHeaders',
+  'breakdownRows',
+  'projectConfig',
+  'screenplays',
+  'assetLibrary'
+]);
+
+function extractJsonTextPayload(text) {
+  const cleaned = sanitizeForJson(String(text || '')).trim();
+  if (!cleaned) return '{}';
+
+  const fencedMatch = cleaned.match(/```json\s*([\s\S]*?)```/i) || cleaned.match(/```([\s\S]*?)```/);
+  if (fencedMatch?.[1]) {
+    return fencedMatch[1].trim();
+  }
+
+  const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+  return objectMatch ? objectMatch[0].trim() : cleaned;
+}
+
+function pickContextPatchKeys(patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return {};
+  return Object.fromEntries(
+    Object.entries(patch).filter(([key, value]) => CONTEXT_EDIT_ALLOWED_KEYS.has(key) && value !== undefined)
+  );
+}
+
+function buildContextEditPrompts(instruction, context) {
+  const systemPrompt = `你是短剧项目的“上下文修订器”。
+
+你的任务不是自由创作，而是基于当前项目 context 按用户要求做最小必要修改，并输出可直接写回项目的 JSON patch。
+
+必须遵守：
+1. 只修改用户明确要求的字段，不要无关重写。
+2. 输出必须是纯 JSON，不要 markdown，不要解释，不要代码块。
+3. JSON 结构必须严格为：
+{
+  "summary": "一句中文摘要，说明你改了什么",
+  "patch": {
+    "storyBible": {},
+    "breakdownHeaders": [],
+    "breakdownRows": [],
+    "projectConfig": {},
+    "screenplays": {},
+    "assetLibrary": {}
+  }
+}
+4. patch 里只能放需要更新的顶层字段；未修改的顶层字段不要输出。
+5. 如果修改 breakdownRows，必须保证和 breakdownHeaders 对应；除非用户要求改总集数，否则保持原有集数和顺序。
+6. 如果修改人物设定、世界观、关系、口吻等全局 canon，优先更新 storyBible，并同步修正明显受影响的 breakdownRows / screenplays。
+7. 如果用户只是在补充说明、纠正设定、强化某集 hook，禁止重写整部剧本。
+8. summary 必须简洁、可读、面向产品用户。`;
+
+  const userMessage = `当前项目 context JSON：
+${JSON.stringify(context, null, 2)}
+
+用户的修改要求：
+${instruction}
+
+请只输出纯 JSON。`;
+
+  return { systemPrompt, userMessage };
 }
 
 // ========== 角色数据后处理 - 确保必要字段存在 ==========
@@ -758,6 +827,55 @@ class ThinkingStreamDetector {
   }
 }
 
+async function consumeSseResponse(body, { onData, onChunk } = {}) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let chunkCount = 0;
+
+  const flushBuffer = (final = false) => {
+    let normalized = buffer.replace(/\r\n/g, '\n');
+    let boundaryIndex = normalized.indexOf('\n\n');
+
+    while (boundaryIndex !== -1) {
+      const rawEvent = normalized.slice(0, boundaryIndex);
+      normalized = normalized.slice(boundaryIndex + 2);
+
+      for (const rawLine of rawEvent.split('\n')) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith(':') || !line.startsWith('data:')) continue;
+        onData?.(line.slice(5).trim());
+      }
+
+      boundaryIndex = normalized.indexOf('\n\n');
+    }
+
+    buffer = final ? '' : normalized;
+
+    if (final && normalized.trim()) {
+      for (const rawLine of normalized.split('\n')) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith(':') || !line.startsWith('data:')) continue;
+        onData?.(line.slice(5).trim());
+      }
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunkCount++;
+    onChunk?.(chunkCount, value);
+    buffer += decoder.decode(value, { stream: true });
+    flushBuffer(false);
+  }
+
+  buffer += decoder.decode();
+  flushBuffer(true);
+
+  return { chunkCount };
+}
+
 // 加载agent的所有skills内容（根据版本配置动态调整）
 function loadAgentSkills(skillIds) {
   const maxSkills = runtimeConfig.maxSkills || 1;
@@ -777,7 +895,7 @@ function loadAgentSkills(skillIds) {
   return loaded.join('\n');
 }
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = ROOT_DIR;
 
 // 读取.env文件
 try {
@@ -858,6 +976,415 @@ function clearUserRequest(username) {
 }
 
 const PORT = process.env.PORT || 3001;
+const HOST = process.env.HOST || '0.0.0.0';
+const FIZZDRAGON_STUDIO_BASE_URL = process.env.FIZZDRAGON_STUDIO_BASE_URL || 'https://fizzdragon.fizzspace.cn/studio';
+const LOCAL_SCENE_SHADOW_PATH = join(ROOT_DIR, 'result', 'local-scene-shot-values.json');
+const SCENE_MENTION_RE = /<mention\s+([^>]*)>([\s\S]*?)<\/mention>/gi;
+const STORYBOARD_PROXY_QUERY_PAGE_SIZE = 100;
+const STORYBOARD_PROXY_QUERY_MAX_PAGES = 20;
+const STORYBOARD_PROXY_SAVE_MAX_ATTEMPTS = 2;
+const STORYBOARD_PROXY_SAVE_VERIFY_RETRIES = 4;
+const STORYBOARD_PROXY_SAVE_VERIFY_DELAY_MS = 600;
+
+function isSuccessResponse(payload) {
+  return !!payload && (
+    payload.code === 200
+    || payload.code === 'SUCCESS'
+    || payload.success === true
+  );
+}
+
+function getShotRows(payload) {
+  if (Array.isArray(payload?.data?.list)) return payload.data.list;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getStoryboardExpectedRowCount(datas) {
+  if (!Array.isArray(datas) || datas.length <= 1) {
+    return 0;
+  }
+  return Math.max(0, datas.length - 1);
+}
+
+function hasStoryboardShotCells(shot) {
+  return Array.isArray(shot?.shotValues) && shot.shotValues.length > 0;
+}
+
+async function fetchAllStoryboardShots(req, storyBoardId) {
+  const shots = [];
+  let totalCount = 0;
+
+  for (let page = 1; page <= STORYBOARD_PROXY_QUERY_MAX_PAGES; page += 1) {
+    const upstream = await forwardFizzdragonJson(
+      req,
+      `${FIZZDRAGON_STUDIO_BASE_URL}/api/user/shot/queryPage`,
+      {
+        storyBoardId,
+        page,
+        pageSize: STORYBOARD_PROXY_QUERY_PAGE_SIZE
+      }
+    );
+
+    if (!upstream.ok || !isSuccessResponse(upstream.payload)) {
+      throw new Error(upstream?.payload?.message || 'Failed to query storyboard shots');
+    }
+
+    const list = getShotRows(upstream.payload);
+    totalCount = Number(upstream?.payload?.data?.totalCount || totalCount || 0);
+    shots.push(...list);
+
+    if (!list.length || list.length < STORYBOARD_PROXY_QUERY_PAGE_SIZE || (totalCount > 0 && shots.length >= totalCount)) {
+      break;
+    }
+  }
+
+  return shots;
+}
+
+async function deleteStoryboardShots(req, storyBoardId) {
+  const shots = await fetchAllStoryboardShots(req, storyBoardId);
+
+  for (const shot of shots) {
+    if (!shot?.shotId) continue;
+    const upstream = await forwardFizzdragonJson(
+      req,
+      `${FIZZDRAGON_STUDIO_BASE_URL}/api/user/shot/delete/${shot.shotId}`
+    );
+    if (!upstream.ok || !isSuccessResponse(upstream.payload)) {
+      throw new Error(upstream?.payload?.message || `Failed to delete storyboard shot ${shot.shotId}`);
+    }
+  }
+}
+
+async function verifyStoryboardSaveIntegrity(req, storyBoardId, expectedRowCount) {
+  if (!storyBoardId || expectedRowCount <= 0) {
+    return {
+      ok: true,
+      shotCount: 0,
+      hydratedShotCount: 0
+    };
+  }
+
+  let lastShotCount = 0;
+  let lastHydratedShotCount = 0;
+
+  for (let attempt = 1; attempt <= STORYBOARD_PROXY_SAVE_VERIFY_RETRIES; attempt += 1) {
+    const shots = await fetchAllStoryboardShots(req, storyBoardId);
+    lastShotCount = shots.length;
+    lastHydratedShotCount = shots.filter(hasStoryboardShotCells).length;
+
+    if (lastHydratedShotCount >= expectedRowCount) {
+      return {
+        ok: true,
+        shotCount: lastShotCount,
+        hydratedShotCount: lastHydratedShotCount
+      };
+    }
+
+    if (attempt < STORYBOARD_PROXY_SAVE_VERIFY_RETRIES) {
+      await sleep(STORYBOARD_PROXY_SAVE_VERIFY_DELAY_MS);
+    }
+  }
+
+  return {
+    ok: false,
+    shotCount: lastShotCount,
+    hydratedShotCount: lastHydratedShotCount
+  };
+}
+
+function buildStoryboardSaveFailurePayload(message, details = {}) {
+  return {
+    code: 500,
+    success: false,
+    message,
+    ...details
+  };
+}
+
+async function forwardStoryboardSaveWithRetry(req, payload) {
+  const expectedRowCount = getStoryboardExpectedRowCount(payload?.datas);
+  let lastUpstream = null;
+  let lastIntegrity = null;
+
+  for (let attempt = 1; attempt <= STORYBOARD_PROXY_SAVE_MAX_ATTEMPTS; attempt += 1) {
+    const upstream = await forwardFizzdragonJson(
+      req,
+      `${FIZZDRAGON_STUDIO_BASE_URL}/api/ai/chat/save/storyboard`,
+      {
+        episodeId: payload?.episodeId,
+        datas: payload?.datas,
+        autoload: payload?.autoload
+      }
+    );
+    lastUpstream = upstream;
+
+    if (upstream.ok && isSuccessResponse(upstream.payload)) {
+      lastIntegrity = await verifyStoryboardSaveIntegrity(req, payload?.episodeId, expectedRowCount);
+      if (lastIntegrity.ok) {
+        return {
+          upstream,
+          integrity: lastIntegrity,
+          attempts: attempt
+        };
+      }
+
+      console.warn(
+        '[fizzstudio/saveStoryboard] incomplete save detected, retrying:',
+        JSON.stringify({
+          episodeId: payload?.episodeId,
+          attempt,
+          expectedRowCount,
+          shotCount: lastIntegrity.shotCount,
+          hydratedShotCount: lastIntegrity.hydratedShotCount
+        })
+      );
+    } else {
+      console.warn(
+        '[fizzstudio/saveStoryboard] upstream business failure, retrying:',
+        JSON.stringify({
+          episodeId: payload?.episodeId,
+          attempt,
+          payload: upstream?.payload || null
+        })
+      );
+    }
+
+    if (attempt >= STORYBOARD_PROXY_SAVE_MAX_ATTEMPTS || !payload?.episodeId) {
+      break;
+    }
+
+    await deleteStoryboardShots(req, payload.episodeId);
+    await sleep(STORYBOARD_PROXY_SAVE_VERIFY_DELAY_MS);
+  }
+
+  if (lastUpstream?.ok && isSuccessResponse(lastUpstream.payload) && lastIntegrity && !lastIntegrity.ok) {
+    return {
+      upstream: {
+        ok: true,
+        status: 200,
+        payload: buildStoryboardSaveFailurePayload('Storyboard save incomplete after retry', {
+          shotCount: lastIntegrity.shotCount,
+          hydratedShotCount: lastIntegrity.hydratedShotCount,
+          expectedRowCount
+        })
+      },
+      integrity: lastIntegrity,
+      attempts: STORYBOARD_PROXY_SAVE_MAX_ATTEMPTS
+    };
+  }
+
+  return {
+    upstream: lastUpstream,
+    integrity: lastIntegrity,
+    attempts: STORYBOARD_PROXY_SAVE_MAX_ATTEMPTS
+  };
+}
+
+function readLocalSceneShadowStore() {
+  if (!existsSync(LOCAL_SCENE_SHADOW_PATH)) {
+    return {};
+  }
+  try {
+    return JSON.parse(readFileSync(LOCAL_SCENE_SHADOW_PATH, 'utf-8'));
+  } catch (error) {
+    console.warn('[scene-shadow] failed to read store:', error?.message || error);
+    return {};
+  }
+}
+
+function writeLocalSceneShadowStore(store) {
+  writeFileSync(LOCAL_SCENE_SHADOW_PATH, JSON.stringify(store, null, 2));
+}
+
+function buildSceneShadowKey(shotId, shotColumnId) {
+  return `${String(shotId || '')}:${String(shotColumnId || '')}`;
+}
+
+function persistLocalSceneShadow(payload = {}) {
+  const key = buildSceneShadowKey(payload.shotId, payload.shotColumnId);
+  if (!payload.shotId || !payload.shotColumnId) return;
+
+  const store = readLocalSceneShadowStore();
+  if (!payload.sceneId && !payload.sceneName) {
+    delete store[key];
+  } else {
+    store[key] = {
+      sceneId: String(payload.sceneId || payload.value || '').trim(),
+      sceneName: String(payload.sceneName || '').trim(),
+      worldId: String(payload.worldId || '').trim()
+    };
+  }
+  writeLocalSceneShadowStore(store);
+}
+
+function getLocalSceneShadow(shotId, shotColumnId) {
+  const store = readLocalSceneShadowStore();
+  return store[buildSceneShadowKey(shotId, shotColumnId)] || null;
+}
+
+function extractSceneMentionEntry(text) {
+  const source = String(text || '');
+  if (!source.includes('<mention')) return null;
+
+  SCENE_MENTION_RE.lastIndex = 0;
+  let match = null;
+  while ((match = SCENE_MENTION_RE.exec(source))) {
+    const attrs = match[1] || '';
+    const name = String(match[2] || '').trim();
+    if (!/type="scene"/i.test(attrs) || !name) continue;
+    const idMatch = attrs.match(/\bid="([^"]+)"/i);
+    return {
+      sceneId: String(idMatch?.[1] || '').trim(),
+      sceneName: name
+    };
+  }
+  return null;
+}
+
+function buildSyntheticScenePayload(sceneId, sceneName, worldId = '') {
+  if (!sceneId && !sceneName) return null;
+  return {
+    id: sceneId || sceneName,
+    name: sceneName || sceneId,
+    worldId: worldId || '',
+    sceneImgPath: []
+  };
+}
+
+function inferSceneEntryFromShot(shot) {
+  const shotValues = Array.isArray(shot?.shotValues) ? shot.shotValues : [];
+  for (const cell of shotValues) {
+    const sourceText = cell?.richText?.content || cell?.value || '';
+    const mentionEntry = extractSceneMentionEntry(sourceText);
+    if (mentionEntry) {
+      return buildSyntheticScenePayload(mentionEntry.sceneId, mentionEntry.sceneName);
+    }
+  }
+
+  return null;
+}
+
+function hydrateSceneCellFromLocalState(shot, cell) {
+  if (cell?.presetColumnKey !== 'scene') return false;
+  if (Array.isArray(cell?.scenes) && cell.scenes.length > 0) return true;
+
+  const shadowEntry = getLocalSceneShadow(shot?.shotId, cell?.shotColumnId);
+  const scenePayload = shadowEntry?.sceneId || shadowEntry?.sceneName
+    ? buildSyntheticScenePayload(shadowEntry.sceneId, shadowEntry.sceneName, shadowEntry.worldId)
+    : inferSceneEntryFromShot(shot);
+
+  if (!scenePayload) {
+    return false;
+  }
+
+  cell.value = scenePayload.id || scenePayload.name;
+  cell.values = scenePayload.id ? [scenePayload.id] : null;
+  cell.scenes = [scenePayload];
+  return true;
+}
+
+function needsRichTextDetail(cell) {
+  if (!cell?.id) return false;
+  const isRichText = cell.shotColumnType === 'RICH_TEXT' || cell.presetColumnKey === 'description';
+  if (!isRichText) return false;
+  return !cell.richText?.content && !cell.value;
+}
+
+function needsSceneDetail(cell) {
+  if (!cell?.id) return false;
+  if (cell.presetColumnKey !== 'scene') return false;
+  const hasScenes = Array.isArray(cell.scenes) && cell.scenes.length > 0;
+  const hasValueRef = (Array.isArray(cell.values) && cell.values.length > 0) || !!cell.value;
+  return !hasScenes && hasValueRef;
+}
+
+function buildFizzdragonForwardHeaders(req, includeJsonContentType = true) {
+  const headers = {
+    accept: 'application/json',
+  };
+
+  if (includeJsonContentType) {
+    headers['content-type'] = 'application/json';
+  }
+  if (req.headers.authorization) {
+    headers.authorization = req.headers.authorization;
+  }
+  if (req.headers.cookie) {
+    headers.cookie = req.headers.cookie;
+  }
+  if (req.headers['accept-language']) {
+    headers['accept-language'] = req.headers['accept-language'];
+  }
+  if (req.headers['user-agent']) {
+    headers['user-agent'] = req.headers['user-agent'];
+  }
+
+  return headers;
+}
+
+async function forwardFizzdragonJson(req, targetUrl, body) {
+  const response = await fetch(targetUrl, {
+    method: 'POST',
+    headers: buildFizzdragonForwardHeaders(req, body !== undefined),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch (error) {
+    payload = text;
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    payload,
+  };
+}
+
+async function hydrateMissingShotRichText(req, payload) {
+  if (!isSuccessResponse(payload)) return payload;
+
+  const pendingCells = [];
+  getShotRows(payload).forEach((shot) => {
+    if (!Array.isArray(shot?.shotValues)) return;
+    shot.shotValues.forEach((cell, cellIndex) => {
+      if (hydrateSceneCellFromLocalState(shot, cell)) {
+        return;
+      }
+      if (needsRichTextDetail(cell) || needsSceneDetail(cell)) {
+        pendingCells.push({ shot, cellIndex, cellId: cell.id });
+      }
+    });
+  });
+
+  await Promise.all(pendingCells.map(async ({ shot, cellIndex, cellId }) => {
+    try {
+      const detail = await forwardFizzdragonJson(
+        req,
+        `${FIZZDRAGON_STUDIO_BASE_URL}/api/user/shotValue/detail/${cellId}`
+      );
+      if (!isSuccessResponse(detail.payload) || !detail.payload?.data) return;
+      shot.shotValues[cellIndex] = {
+        ...shot.shotValues[cellIndex],
+        ...detail.payload.data,
+      };
+      hydrateSceneCellFromLocalState(shot, shot.shotValues[cellIndex]);
+    } catch (error) {
+      console.warn('[fizzstudio/queryShotList] hydrate rich text failed:', cellId, error?.message || error);
+    }
+  }));
+
+  return payload;
+}
 
 // 通过OpenClaw CLI调用Claude
 async function callViaOpenClaw(systemPrompt, userMessage) {
@@ -952,7 +1479,7 @@ let totalTokens = { input: 0, output: 0, cost: 0 };
 const TOKEN_PRICE = { input: 0.003 / 1000, output: 0.015 / 1000 }; // Sonnet pricing
 
 // ========== 並發限制 + 請求隊列管理 ==========
-const MAX_CONCURRENT = 3;  // 最多3個智能體同時運行
+const MAX_CONCURRENT = Math.max(1, Number(process.env.MAX_CONCURRENT_PIPELINE || process.env.MAX_CONCURRENT || 3));  // 智能體同時運行上限
 let activeRequests = 0;    // 當前運行中的請求數
 let requestQueue = [];     // 等待隊列
 let requestIdCounter = 0;  // 請求ID計數器
@@ -1027,6 +1554,47 @@ const RETRY_CONFIG = {
 // 备用Provider顺序
 const FALLBACK_PROVIDERS = ['dashscope', 'deepseek', 'openrouter'];
 
+const STABLE_PIPELINE_SEED = Number(process.env.PIPELINE_STABLE_SEED || 20260319);
+const STABLE_DASHSCOPE_AGENT_IDS = new Set([
+  'story_bible_extractor',
+  'story_breakdown_pack',
+  'screenwriter',
+  'asset_extractor',
+  'asset_extractor_repair',
+  'asset_qc_gate',
+  'storyboard_csv',
+  'character_costume'
+]);
+
+function resolveOpenAICompatibleModel(provider, providerId, agentId, options, useReasoner, longOutputAgents) {
+  if (useReasoner) return 'deepseek-reasoner';
+
+  return longOutputAgents.includes(agentId) ? provider.models.best : provider.models.fast;
+}
+
+function resolveGenerationSettings(agentId = '', options = {}, providerId = currentProvider) {
+  const settings = {};
+
+  if (options.temperature != null) settings.temperature = Number(options.temperature);
+  if (options.top_p != null) settings.top_p = Number(options.top_p);
+  if (options.top_k != null) settings.top_k = Number(options.top_k);
+  if (options.seed != null) settings.seed = Number(options.seed);
+
+  if (options.generationMode === 'stable' && providerId === 'dashscope' && STABLE_DASHSCOPE_AGENT_IDS.has(agentId)) {
+    if (settings.seed == null) settings.seed = STABLE_PIPELINE_SEED;
+    if (settings.temperature == null && settings.top_p == null) settings.top_p = 0.01;
+    if (settings.top_k == null) settings.top_k = 1;
+  }
+
+  if (options.responseFormat?.type) {
+    settings.response_format = options.responseFormat;
+  } else if (options.generationMode === 'stable' && providerId === 'dashscope' && needsJsonOutput(agentId)) {
+    settings.response_format = { type: 'json_object' };
+  }
+
+  return settings;
+}
+
 // 带重试的API调用包装器
 async function callWithRetry(callFn, agentId = '') {
   let lastError = null;
@@ -1061,22 +1629,25 @@ async function callWithRetry(callFn, agentId = '') {
 
 // 带Provider备份的调用
 async function callWithFallback(systemPrompt, userMessage, agentId = '', options = {}) {
-  const originalProvider = currentProvider;
+  const preferredProvider = options.provider && PROVIDERS[options.provider]
+    ? options.provider
+    : currentProvider;
+  const providerOrder = options.disableFallback
+    ? [preferredProvider]
+    : [preferredProvider, ...FALLBACK_PROVIDERS.filter((provider) => provider !== preferredProvider)];
   let lastError = null;
-  
-  for (const provider of FALLBACK_PROVIDERS) {
+
+  for (const provider of providerOrder) {
     const providerKey = getApiKeyForProvider(provider);
     if (!providerKey) {
       continue; // 跳过没有配置key的provider
     }
-    
+
     try {
-      currentProvider = provider;
       const result = await callWithRetry(
-        () => callOpenAICompatibleCore(systemPrompt, userMessage, agentId, options),
+        () => callOpenAICompatibleCore(systemPrompt, userMessage, agentId, options, provider),
         agentId
       );
-      currentProvider = originalProvider;
       return result;
     } catch (err) {
       console.log(`❌ ${provider} 失败 (${agentId}): ${err.message || err}`);
@@ -1084,34 +1655,33 @@ async function callWithFallback(systemPrompt, userMessage, agentId = '', options
     }
   }
 
-  currentProvider = originalProvider;
   throw new Error(`所有Provider都失败了 (${agentId}): ${lastError?.message || String(lastError) || '未知错误'}`);
 }
 
 // ========== DeepSeek/OpenRouter API调用 (OpenAI兼容) ==========
-async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '', options = {}) {
-  const provider = PROVIDERS[currentProvider];
+async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '', options = {}, providerId = currentProvider) {
+  const provider = PROVIDERS[providerId];
   const baseUrl = provider.baseUrl;
-  const apiKey = getApiKeyForProvider(currentProvider);
+  const apiKey = getApiKeyForProvider(providerId);
   
   if (!apiKey) {
-    throw new Error(`Missing API key for ${currentProvider}. Set ${currentProvider.toUpperCase()}_API_KEY in .env`);
+    throw new Error(`Missing API key for ${providerId}. Set ${providerId.toUpperCase()}_API_KEY in .env`);
   }
   
-  const needsLongOutput = ['storyboard', 'narrative', 'chapters', 'concept', 'screenwriter', 'character', 'novelist', 'story_architect', 'episode_planner', 'aggregate', 'story_breakdown_pack'].includes(agentId);
+  const needsLongOutput = ['storyboard', 'storyboard_csv', 'narrative', 'chapters', 'concept', 'screenwriter', 'character', 'novelist', 'story_architect', 'episode_planner', 'aggregate', 'story_breakdown_pack'].includes(agentId);
   // 🔧 分镜不再强制使用reasoner（太慢），改用普通模型+更大max_tokens
   // 前端可以指定useReasoner强制使用
-  const useReasoner = options.useReasoner === true && currentProvider === 'deepseek';
+  const useReasoner = options.useReasoner === true && providerId === 'deepseek';
 
   // 分镜/小说需要更多tokens
   // ⚠️ DashScope qwen-long max_tokens上限6000, qwen-max上限8192
   // DeepSeek所有模型max_tokens上限都是8192
-  const longOutputAgents = ['storyboard', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner', 'format_adapter', 'aggregate', 'story_breakdown_pack'];
-  const model = useReasoner ? 'deepseek-reasoner' : (longOutputAgents.includes(agentId) ? provider.models.best : provider.models.fast);
+  const longOutputAgents = ['storyboard', 'storyboard_csv', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner', 'format_adapter', 'aggregate', 'story_breakdown_pack', 'asset_extractor', 'asset_extractor_repair'];
+  const model = resolveOpenAICompatibleModel(provider, providerId, agentId, options, useReasoner, longOutputAgents);
 
   let maxTokens = longOutputAgents.includes(agentId) ? 8192 : (needsLongOutput ? 8192 : 4096);
   // dashscope qwen-turbo/qwen-plus max_tokens上限8192
-  if (currentProvider === 'dashscope') {
+  if (providerId === 'dashscope') {
     maxTokens = Math.min(maxTokens, 8192);
   }
   
@@ -1126,8 +1696,20 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
   // 🔧 添加超时控制（Render免费版30秒限制，设25秒以便返回错误）
   const controller = new AbortController();
   // 长输出agent需要更多时间（aggregate每批~6750 tokens，约120-150秒）
-  const needsLongTimeout = useReasoner || ['character', 'aggregate', 'story_breakdown_pack', 'screenwriter', 'novelist'].includes(agentId);
-  const timeoutId = setTimeout(() => controller.abort(), needsLongTimeout ? 180000 : 25000);
+  const needsLongTimeout = useReasoner || [
+    'character',
+    'aggregate',
+    'story_breakdown_pack',
+    'screenwriter',
+    'novelist',
+    'storyboard',
+    'storyboard_csv',
+    'asset_extractor',
+    'asset_extractor_repair'
+  ].includes(agentId);
+  const timeoutMs = needsLongTimeout ? 180000 : 25000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const generationSettings = resolveGenerationSettings(agentId, options, providerId);
   
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -1136,12 +1718,13 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
-        ...(currentProvider === 'openrouter' ? { 'HTTP-Referer': 'https://fizzdragon.com' } : {})
+        ...(providerId === 'openrouter' ? { 'HTTP-Referer': 'https://fizzdragon.com' } : {})
       },
       body: JSON.stringify({
         model: model,
         max_tokens: maxTokens,
         stream: false,  // 暂时关闭流式，后续可开启
+        ...generationSettings,
         messages: [
           { role: 'system', content: cleanSystem },
           { role: 'user', content: cleanUser }
@@ -1173,13 +1756,15 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
     return {
       text: text.trim(),
       tokens: { input: inputTokens, output: outputTokens },
-      reasoning: reasoning  // 返回思考过程供前端显示
+      reasoning: reasoning,  // 返回思考过程供前端显示
+      provider: providerId
     };
   } catch (err) {
     clearTimeout(timeoutId);  // 确保清除超时
     if (err.name === 'AbortError') {
-      console.error(`${provider.name} API timeout (${useReasoner ? '120s' : '25s'})`);
-      throw new Error(`請求超時（${useReasoner ? '120' : '25'}秒），請重試或縮短內容`);
+      const timeoutSeconds = Math.round(timeoutMs / 1000);
+      console.error(`${provider.name} API timeout (${timeoutSeconds}s)`);
+      throw new Error(`請求超時（${timeoutSeconds}秒），請重試或縮短內容`);
     }
     console.error(`${provider.name} API error:`, err.message);
     throw err;
@@ -1248,7 +1833,8 @@ async function callAnthropicAPI(systemPrompt, userMessage, agentId = '', options
     return {
       text: text.trim(),
       tokens: { input: inputTokens, output: outputTokens },
-      reasoning
+      reasoning,
+      provider: 'anthropic'
     };
   } catch (err) {
     console.error('Anthropic API error:', err.message);
@@ -1307,7 +1893,8 @@ async function callGeminiAPI(systemPrompt, userMessage, agentId = '') {
     
     return {
       text: text.trim(),
-      tokens: { input: inputTokens, output: outputTokens }
+      tokens: { input: inputTokens, output: outputTokens },
+      provider: 'gemini'
     };
   } catch (err) {
     console.error('Gemini API error:', err.message);
@@ -1317,13 +1904,20 @@ async function callGeminiAPI(systemPrompt, userMessage, agentId = '') {
 
 // ========== 统一调用入口 ==========
 async function callClaudeInternal(systemPrompt, userMessage, agentId = '', options = {}) {
-  if (currentProvider === 'anthropic') {
+  const providerId = options.provider && PROVIDERS[options.provider]
+    ? options.provider
+    : currentProvider;
+
+  if (providerId === 'anthropic') {
     return callAnthropicAPI(systemPrompt, userMessage, agentId, options);
-  } else if (currentProvider === 'gemini') {
+  } else if (providerId === 'gemini') {
     return callGeminiAPI(systemPrompt, userMessage, agentId);
   } else {
     // 🛡️ Bug#5修复: 使用带重试+备份的调用
-    return callWithFallback(systemPrompt, userMessage, agentId, options);
+    return callWithFallback(systemPrompt, userMessage, agentId, {
+      ...options,
+      provider: providerId
+    });
   }
 }
 
@@ -1382,7 +1976,12 @@ async function callClaudeWithStreaming(systemPrompt, userMessage, agentId, optio
       const baseUrl = provider.baseUrl;
       const detector = new ThinkingStreamDetector();
 
-      const selectedModel = options.model || provider.models.standard;
+      const longOutputAgents = ['storyboard', 'storyboard_csv', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner', 'format_adapter', 'aggregate', 'story_breakdown_pack', 'asset_extractor', 'asset_extractor_repair'];
+      const selectedModel = options.model || resolveOpenAICompatibleModel(provider, currentProvider, agentId, options || {}, false, longOutputAgents);
+      const requestedMaxTokens = options.maxTokens || 8192;
+      const maxTokens = currentProvider === 'dashscope'
+        ? Math.min(requestedMaxTokens, 8192)
+        : requestedMaxTokens;
       console.log(`[Stream] Calling ${provider.name} (${selectedModel}), prompt: ${systemPrompt.length + userMessage.length} chars`);
       const response = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
@@ -1392,8 +1991,8 @@ async function callClaudeWithStreaming(systemPrompt, userMessage, agentId, optio
           ...(currentProvider === 'openrouter' ? { 'HTTP-Referer': 'https://fizzdragon.com' } : {})
         },
         body: JSON.stringify({
-          model: options.model || provider.models.standard,
-          max_tokens: options.maxTokens || 8192,
+          model: selectedModel,
+          max_tokens: maxTokens,
           stream: true,
           messages: [
             { role: 'system', content: systemPrompt },
@@ -1408,37 +2007,22 @@ async function callClaudeWithStreaming(systemPrompt, userMessage, agentId, optio
         throw new Error(`${provider.name} API error: ${response.status} ${errText}`);
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
       console.log(`[Stream] Starting to read ${provider.name} stream...`);
-      let chunkCount = 0;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunkCount++;
-        if (chunkCount <= 2) console.log(`[Stream] Chunk #${chunkCount} received, ${value.length} bytes`);
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n').filter(line => line.startsWith('data: '));
-
-        for (const line of lines) {
-          const data = line.slice(6);
-          if (data === '[DONE]') continue;
+      await consumeSseResponse(response.body, {
+        onChunk: (chunkCount, value) => {
+          if (chunkCount <= 2) console.log(`[Stream] Chunk #${chunkCount} received, ${value.length} bytes`);
+        },
+        onData: (data) => {
+          if (data === '[DONE]') return;
           try {
             const parsed = JSON.parse(data);
-            const delta = parsed.choices?.[0]?.delta;
-
-            // DeepSeek reasoning_content
-            if (delta?.reasoning_content) {
-              fullThinking += delta.reasoning_content;
-              onThinking?.(delta.reasoning_content);
-              continue;
+            if (parsed.error) {
+              throw new Error(`${provider.name} API error: ${parsed.error.code || 'stream_error'} ${parsed.error.message || ''}`.trim());
             }
+            const delta = parsed.choices?.[0]?.delta;
 
             const content = delta?.content || '';
             if (content) {
-              // Use ThinkingStreamDetector for <thinking> tag detection
               const events = detector.feed(content);
               for (const evt of events) {
                 if (evt.type === 'thinking') {
@@ -1451,14 +2035,15 @@ async function callClaudeWithStreaming(systemPrompt, userMessage, agentId, optio
               }
             }
 
-            // Token usage (some providers send in final chunk)
             if (parsed.usage) {
               inputTokens = parsed.usage.prompt_tokens || 0;
               outputTokens = parsed.usage.completion_tokens || 0;
             }
-          } catch { /* ignore parse errors */ }
+          } catch (err) {
+            throw err;
+          }
         }
-      }
+      });
 
       // Flush detector buffer
       const remaining = detector.flush();
@@ -1583,16 +2168,18 @@ app.post('/api/agent/:agentId', async (req, res) => {
   const { agentId } = req.params;
   const { content, context, novel, title, userInput, useReasoner, provider: requestedProvider } = req.body;
   const actualContent = content || novel || userInput || "";
-  const options = { useReasoner: useReasoner === true };
+  const options = {
+    useReasoner: useReasoner === true,
+    ...(requestedProvider && PROVIDERS[requestedProvider]
+      ? { provider: requestedProvider, disableFallback: true }
+      : {})
+  };
 
   // Screenwriter mode (default can be set via env)
   const screenwriterMode = (context?.screenwriterMode || process.env.SCREENWRITER_MODE_DEFAULT || 'legacy').trim();
   
-  // 🆕 支持前端指定provider（临时切换）
-  const originalProvider = currentProvider;
   if (requestedProvider && PROVIDERS[requestedProvider]) {
-    currentProvider = requestedProvider;
-    console.log(`[Provider] 临时切换到 ${requestedProvider}`);
+    console.log(`[Provider] 请求锁定到 ${requestedProvider}`);
   }
   
   const agent = AGENTS[agentId];
@@ -1719,9 +2306,9 @@ ${truncatedContent}`;
     
     console.log(`[${agent.name}] Done!`);
     
-    // 🧠 解析<thinking>标签中的思考过程
+    // 🧠 只暴露模型正文里的 <thinking>，不回退到 provider reasoning_content
     let finalResult = result.text;
-    let thinkingContent = result.reasoning || null;
+    let thinkingContent = null;
     
     const thinkingMatch = result.text.match(/<thinking>([\s\S]*?)<\/thinking>/);
     if (thinkingMatch) {
@@ -1949,9 +2536,6 @@ ${truncatedContent}`;
       }
     }
 
-    // 🆕 恢复原provider
-    if (requestedProvider) currentProvider = originalProvider;
-    
     res.json({ 
       result: finalResult, 
       agent: agentId,
@@ -1959,13 +2543,10 @@ ${truncatedContent}`;
       skillsUsed: agent.skills,
       tokens: result.tokens,
       totalTokens: totalTokens,
-      reasoning: thinkingContent,  // 思考过程（<thinking>标签或DeepSeek reasoner）
-      provider: requestedProvider || currentProvider  // 🆕 返回使用的provider
+      reasoning: thinkingContent,
+      provider: result.provider || requestedProvider || currentProvider
     });
   } catch (err) {
-    // 🆕 恢复原provider
-    if (requestedProvider) currentProvider = originalProvider;
-    
     console.error(`[${agent.name}] Error:`, err.message);
     // 🔧 确保错误响应也有CORS头
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -1976,6 +2557,7 @@ ${truncatedContent}`;
 
 // ========== Pipeline API (modular) ==========
 import { createPipelineRouter } from './pipeline/index.js';
+import { createOrchestrateHandler } from './pipeline/routes/orchestrate.js';
 const pipelineRouter = createPipelineRouter({
   AGENTS, loadAgentSkills, needsJsonOutput,
   callClaude, callClaudeWithStreaming,
@@ -1984,24 +2566,92 @@ const pipelineRouter = createPipelineRouter({
   _PROVIDERS: PROVIDERS
 });
 app.use('/api/pipeline', pipelineRouter);
+app.use('/api/ai/forward', pipelineRouter);
 
 // ========== Pipeline Stream Routes (registered on main app to avoid Express sub-router SSE buffering) ==========
 import { PIPELINE_AGENT_MAP, PIPELINE_STEPS } from './pipeline/config.js';
 import { buildPipelinePrompt } from './pipeline/services/prompt-builder.js';
+import { normalizePipelineStepOutput } from './pipeline/services/output-normalizer.js';
+import { buildDeterministicBreakdownCsv, shouldUseDeterministicBreakdownFallback } from './pipeline/services/deterministic-breakdown.js';
+import { buildDeterministicCharacterCostume, shouldPreferDeterministicCharacterCostume } from './pipeline/services/deterministic-character-costume.js';
+
+const PIPELINE_THINKING_HINTS = {
+  'extract-bible': '正在抽取世界观、角色关系与核心规则。',
+  breakdown: '正在分析原文结构并拆解剧集节奏。',
+  screenplay: '正在根据当前剧集映射撰写可拍剧本。',
+  storyboard: '正在把剧本拆成镜头级分镜。',
+  'extract-assets': '正在从当前内容中提取角色、场景和道具。',
+  'design-characters': '正在汇总角色设定、服装关系与跨集出场信息。'
+};
+
+function buildExtractAssetsRepairPrompt(body, normalized, deps = {}) {
+  const episodeId = Number.isInteger(body?.episodeIndex)
+    ? `E${String(body.episodeIndex + 1).padStart(3, '0')}`
+    : null;
+  const agentId = 'asset_extractor_repair';
+  const agent = deps?.AGENTS?.[agentId];
+  const skillsContent = agent?.skills && typeof deps?.loadAgentSkills === 'function'
+    ? deps.loadAgentSkills(agent.skills)
+    : '';
+  const systemPrompt = agent
+    ? `${agent.prompt}\n\n---\n## 专业方法论参考（必须运用以下方法分析用户内容）：\n${skillsContent}\n---\n\n**重要：请基于以上方法论修复用户提供的 JSON。只修复 schema、命名、引用与归类问题，不要改写剧情，不要新增设定。**`
+    : '';
+
+  return {
+    systemPrompt,
+    userMessage: `Current task: repair invalid extract-assets JSON.\n\nStrictly follow the currently loaded skills on the repair agent for the 5-library schema, prop extraction, scene extraction, and language-following rules. Only fix schema, naming, references, and scene/prop classification issues. Do not rewrite the story.\n${episodeId ? `Current episode: ${episodeId}\n` : ''}\nCurrent screenplay:\n${body.screenplay || ''}\n\nValidation errors:\n${JSON.stringify(normalized.details?.errors || [], null, 2)}\n\nBroken JSON to repair:\n${normalized.raw || ''}`,
+    agentId
+  };
+}
+
+function buildStoryboardRepairPrompt(body, normalized, deps = {}) {
+  const agentId = 'storyboard_repair';
+  const agent = deps?.AGENTS?.[agentId];
+  const skillsContent = agent?.skills && typeof deps?.loadAgentSkills === 'function'
+    ? deps.loadAgentSkills(agent.skills)
+    : '';
+  const systemPrompt = agent
+    ? `${agent.prompt}\n\n---\n## 专业方法论参考（必须运用以下方法分析用户内容）：\n${skillsContent}\n---\n\n**重要：请基于以上方法论修复用户提供的 CSV。只修复 contract、列级缺失、scene/prop 归类与 canon 复用问题，不要改写剧本。**`
+    : '';
+  const assets = body?.assets || body?.assetLibrary;
+  const assetsText = assets ? `\n\nAvailable assets:\n${typeof assets === 'string' ? assets : JSON.stringify(assets)}` : '';
+
+  return {
+    systemPrompt,
+    userMessage: `Current task: repair invalid storyboard CSV.\n\nStrictly follow the currently loaded storyboard skills and repair rules on the repair agent. Make the minimum necessary fixes only; do not regenerate the whole storyboard.\n\nCurrent screenplay:\n${body.screenplay || ''}${assetsText}\n\nValidation errors:\n${JSON.stringify(normalized.details || {}, null, 2)}\n\nBroken CSV to repair:\n${normalized.raw || ''}`,
+    agentId
+  };
+}
+
+const orchestrateHandler = createOrchestrateHandler({
+  callClaudeWithStreaming,
+  AGENTS,
+  loadAgentSkills,
+  needsJsonOutput,
+  buildSourceRanges,
+  PROVIDERS,
+  getCurrentProvider: () => currentProvider
+});
+
+app.post('/api/pipeline/run', orchestrateHandler);
+app.post('/api/ai/forward/run', orchestrateHandler);
 
 for (const stepId of PIPELINE_STEPS) {
-  app.post(`/api/pipeline/${stepId}/stream`, async (req, res) => {
+  const streamHandler = async (req, res) => {
     console.log(`[Pipeline:${stepId}/stream] Request received`);
 
     // Auto-inject project context when projectId is provided
     if (req.body.projectId) {
       const userId = '_public';
       const ctx = readProjectContext(userId, req.body.projectId);
+      const disabledContextKeys = new Set(Array.isArray(req.body.disableContextKeys) ? req.body.disableContextKeys : []);
       if (ctx) {
         for (const [k, v] of Object.entries(ctx)) {
+          if (disabledContextKeys.has(k)) continue;
           if (req.body[k] === undefined && v != null) req.body[k] = v;
         }
-        console.log(`[Pipeline:${stepId}/stream] Injected context keys: ${Object.keys(ctx).join(',')}`);
+        const injectedKeys = Object.keys(ctx).filter((key) => !disabledContextKeys.has(key));
+        console.log(`[Pipeline:${stepId}/stream] Injected context keys: ${injectedKeys.join(',')}`);
       }
     }
 
@@ -2017,15 +2667,49 @@ for (const stepId of PIPELINE_STEPS) {
       if (!res.writableEnded) try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {}
     };
 
+    const writeDeterministicCharacterCostume = (reason) => {
+      const deterministicAssets = buildDeterministicCharacterCostume(req.body);
+      write({
+        type: 'thinking',
+        content: reason || '角色设计改为本地确定性生成，避免流式返回无效内容。'
+      });
+      write({
+        type: 'done',
+        fullText: JSON.stringify(deterministicAssets),
+        fullThinking: null,
+        tokens: { input: 0, output: 0 },
+        agent: 'deterministic_character_costume_fallback',
+        provider: 'deterministic-local'
+      });
+    };
+
     try {
+      const initialThinking = PIPELINE_THINKING_HINTS[stepId];
+      if (initialThinking) {
+        write({ type: 'thinking', content: initialThinking });
+      }
+
+      if (stepId === 'design-characters' && shouldPreferDeterministicCharacterCostume(req.body)) {
+        // DashScope long-form character-costume streaming is known to emit invalid zero chunks here.
+        writeDeterministicCharacterCostume('角色设计改为本地确定性生成，避免长文本流式返回无效内容。');
+        console.warn(`[Pipeline:${stepId}/stream] Deterministic path used for long DashScope character costume generation`);
+        if (!res.writableEnded) res.end();
+        return;
+      }
+
       const deps = { AGENTS, loadAgentSkills, needsJsonOutput, buildSourceRanges };
-      const { systemPrompt, userMessage, agentId } = buildPipelinePrompt(stepId, req.body, deps);
+      const { systemPrompt, userMessage, agentId, options = {} } = buildPipelinePrompt(stepId, req.body, deps);
       console.log(`[Pipeline:${stepId}/stream] Calling ${agentId}`);
 
-      const provider = PROVIDERS[currentProvider];
-      const apiKey = getApiKeyForProvider(currentProvider);
+      const providerId = req.body.provider && PROVIDERS[req.body.provider]
+        ? req.body.provider
+        : currentProvider;
+      const provider = PROVIDERS[providerId];
+      const apiKey = getApiKeyForProvider(providerId);
       const baseUrl = provider.baseUrl;
-      const model = provider.models.standard;
+      const longOutputAgents = ['storyboard', 'storyboard_csv', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner', 'aggregate', 'story_breakdown_pack', 'asset_extractor', 'asset_extractor_repair'];
+      const model = resolveOpenAICompatibleModel(provider, providerId, agentId, options, false, longOutputAgents);
+      const generationSettings = resolveGenerationSettings(agentId, options, providerId);
       console.log(`[Pipeline:${stepId}/stream] Using ${provider.name} model=${model}, prompt=${systemPrompt.length}+${userMessage.length} chars`);
 
       const apiResp = await fetch(`${baseUrl}/chat/completions`, {
@@ -2033,6 +2717,7 @@ for (const stepId of PIPELINE_STEPS) {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({
           model, max_tokens: 8192, stream: true,
+          ...generationSettings,
           messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]
         })
       });
@@ -2043,26 +2728,100 @@ for (const stepId of PIPELINE_STEPS) {
       }
       console.log(`[Pipeline:${stepId}/stream] API response status: ${apiResp.status}`);
 
-      const reader = apiResp.body.getReader();
-      const decoder = new TextDecoder();
+      const detector = new ThinkingStreamDetector();
       let fullText = '', fullThinking = '', inputTokens = 0, outputTokens = 0;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const lines = decoder.decode(value).split('\n').filter(l => l.startsWith('data: '));
-        for (const line of lines) {
-          const data = line.slice(6);
-          if (data === '[DONE]') continue;
+      await consumeSseResponse(apiResp.body, {
+        onData: (data) => {
+          if (data === '[DONE]') return;
           try {
             const parsed = JSON.parse(data);
+            if (parsed.error) {
+              throw new Error(`${provider.name} API error: ${parsed.error.code || 'stream_error'} ${parsed.error.message || ''}`.trim());
+            }
             const delta = parsed.choices?.[0]?.delta;
-            if (delta?.reasoning_content) { fullThinking += delta.reasoning_content; write({ type: 'thinking', content: delta.reasoning_content }); }
-            else if (delta?.content) { fullText += delta.content; write({ type: 'chunk', content: delta.content }); }
-            if (parsed.usage) { inputTokens = parsed.usage.prompt_tokens || 0; outputTokens = parsed.usage.completion_tokens || 0; }
-          } catch {}
+            if (delta?.content) {
+              const events = detector.feed(delta.content);
+              for (const event of events) {
+                if (event.type === 'thinking') {
+                  fullThinking += event.text;
+                  write({ type: 'thinking', content: event.text });
+                } else {
+                  fullText += event.text;
+                  write({ type: 'chunk', content: event.text });
+                }
+              }
+            }
+            if (parsed.usage) {
+              inputTokens = parsed.usage.prompt_tokens || 0;
+              outputTokens = parsed.usage.completion_tokens || 0;
+            }
+          } catch (err) {
+            throw err;
+          }
+        }
+      });
+      for (const event of detector.flush()) {
+        if (event.type === 'thinking') {
+          fullThinking += event.text;
+          write({ type: 'thinking', content: event.text });
+        } else {
+          fullText += event.text;
+          write({ type: 'chunk', content: event.text });
         }
       }
+      let normalized = normalizePipelineStepOutput(stepId, fullText, req.body);
+      if (normalized.error) {
+        if (stepId === 'extract-assets') {
+          try {
+            const repairPrompt = buildExtractAssetsRepairPrompt(req.body, normalized, { AGENTS, loadAgentSkills });
+            const repairResult = await callClaude(
+              repairPrompt.systemPrompt,
+              repairPrompt.userMessage,
+              repairPrompt.agentId,
+              { provider: providerId, disableFallback: true }
+            );
+            const { content: repairedContent } = extractThinking(repairResult.text || '');
+            normalized = normalizePipelineStepOutput(stepId, sanitizeForJson(repairedContent), req.body);
+            if (!normalized.error) {
+              inputTokens += repairResult.tokens?.input || 0;
+              outputTokens += repairResult.tokens?.output || 0;
+            }
+          } catch (repairError) {
+            console.warn(`[Pipeline:${stepId}/stream] Repair attempt failed: ${repairError.message}`);
+          }
+        }
+        if (stepId === 'storyboard' && normalized.error === 'storyboard_csv_malformed') {
+          try {
+            const repairPrompt = buildStoryboardRepairPrompt(req.body, normalized, { AGENTS, loadAgentSkills });
+            const repairResult = await callClaude(
+              repairPrompt.systemPrompt,
+              repairPrompt.userMessage,
+              repairPrompt.agentId,
+              { provider: providerId, disableFallback: true }
+            );
+            const { content: repairedContent } = extractThinking(repairResult.text || '');
+            normalized = normalizePipelineStepOutput(stepId, sanitizeForJson(repairedContent), req.body);
+            if (!normalized.error) {
+              inputTokens += repairResult.tokens?.input || 0;
+              outputTokens += repairResult.tokens?.output || 0;
+            }
+          } catch (repairError) {
+            console.warn(`[Pipeline:${stepId}/stream] Storyboard repair attempt failed: ${repairError.message}`);
+          }
+        }
+      }
+      if (normalized.error) {
+        if (stepId === 'design-characters') {
+          writeDeterministicCharacterCostume('角色设计模型结果解析失败，已自动切换为本地确定性生成。');
+          console.warn(`[Pipeline:${stepId}/stream] Deterministic fallback used after normalization error: ${normalized.error}`);
+          if (!res.writableEnded) res.end();
+          return;
+        }
+        write({ type: 'error', error: normalized.error, details: normalized.details, raw: normalized.raw });
+        if (!res.writableEnded) res.end();
+        return;
+      }
+      fullText = normalized.result;
       write({ type: 'done', fullText, fullThinking: fullThinking || null, tokens: { input: inputTokens, output: outputTokens } });
 
       // Write back generated screenplay to project-context for cross-episode continuity
@@ -2073,13 +2832,206 @@ for (const stepId of PIPELINE_STEPS) {
         }).catch(err => console.error(`[Pipeline:screenplay/stream] Context writeback failed:`, err.message));
         console.log(`[Pipeline:screenplay/stream] Wrote back screenplay for episode ${epIdx}`);
       }
+      } catch (err) {
+        if (stepId === 'breakdown' && shouldUseDeterministicBreakdownFallback(err)) {
+          try {
+            const fallbackCsv = buildDeterministicBreakdownCsv(req.body, { buildSourceRanges });
+            write({
+              type: 'done',
+              fullText: fallbackCsv,
+              fullThinking: null,
+              tokens: { input: 0, output: 0 },
+              agent: 'deterministic_breakdown_fallback',
+              provider: 'deterministic-local'
+            });
+            console.warn(`[Pipeline:${stepId}/stream] Deterministic fallback used: ${err.message}`);
+            if (!res.writableEnded) res.end();
+            return;
+          } catch (fallbackErr) {
+            console.error(`[Pipeline:${stepId}/stream] Deterministic fallback failed:`, fallbackErr.message);
+          }
+        }
+
+        console.error(`[Pipeline:${stepId}/stream] Error:`, err.message);
+        write({ type: 'error', error: err.message });
+      }
+    if (!res.writableEnded) res.end();
+  };
+
+  app.post(`/api/pipeline/${stepId}/stream`, streamHandler);
+  app.post(`/api/ai/forward/${stepId}/stream`, streamHandler);
+}
+
+const registerContextEditStreamRoute = (path) => {
+  app.post(path, async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.flushHeaders();
+    res.write(':ok\n\n');
+
+    const write = (data) => {
+      if (!res.writableEnded) {
+        try {
+          res.write(`data: ${JSON.stringify(data)}\n\n`);
+        } catch {}
+      }
+    };
+
+    const { projectId, instruction } = req.body || {};
+    if (!projectId || !instruction) {
+      write({ type: 'error', error: 'Missing required fields: projectId, instruction' });
+      if (!res.writableEnded) res.end();
+      return;
+    }
+
+    const currentContext = readProjectContext('_public', projectId);
+    if (!currentContext || Object.keys(currentContext).length === 0) {
+      write({ type: 'error', error: 'Project context is empty. Run extract/breakdown first.' });
+      if (!res.writableEnded) res.end();
+      return;
+    }
+
+    const { systemPrompt, userMessage } = buildContextEditPrompts(instruction, currentContext);
+    console.log(`[ContextEdit] Request received for ${projectId}, prompt=${systemPrompt.length}+${userMessage.length} chars`);
+
+    try {
+      const providerId = req.body.provider && PROVIDERS[req.body.provider]
+        ? req.body.provider
+        : currentProvider;
+
+      let fullText = '';
+      let fullThinking = '';
+      let tokens = { input: 0, output: 0 };
+
+      if (providerId === 'anthropic' && anthropic) {
+        const stream = anthropic.messages.stream({
+          model: PROVIDERS.anthropic.models.standard,
+          max_tokens: 8192,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userMessage }],
+          stream: true
+        });
+
+        stream.on('thinking', (thinking) => {
+          fullThinking += thinking;
+          write({ type: 'thinking', content: thinking });
+        });
+        stream.on('text', (text) => {
+          fullText += text;
+          write({ type: 'chunk', content: text });
+        });
+
+        const finalMessage = await stream.finalMessage();
+        tokens = {
+          input: finalMessage.usage?.input_tokens || 0,
+          output: finalMessage.usage?.output_tokens || 0
+        };
+      } else {
+        const provider = PROVIDERS[providerId];
+        if (!provider?.baseUrl) {
+          throw new Error(`Provider ${providerId} does not support OpenAI-compatible streaming`);
+        }
+
+        const apiKey = getApiKeyForProvider(providerId);
+        const model = provider.models.best || provider.models.standard;
+
+        const apiResp = await fetch(`${provider.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            ...(providerId === 'openrouter' ? { 'HTTP-Referer': 'https://fizzdragon.com' } : {})
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 8192,
+            stream: true,
+            temperature: 0.2,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userMessage }
+            ]
+          })
+        });
+
+        if (!apiResp.ok) {
+          const errText = await apiResp.text().catch(() => '');
+          throw new Error(`${provider.name} API error: ${apiResp.status} ${errText}`);
+        }
+
+        const reader = apiResp.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const lines = decoder.decode(value).split('\n').filter(line => line.startsWith('data: '));
+          for (const line of lines) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              const delta = parsed.choices?.[0]?.delta;
+
+              if (delta?.content) {
+                fullText += delta.content;
+                write({ type: 'chunk', content: delta.content });
+              }
+
+              if (parsed.usage) {
+                tokens = {
+                  input: parsed.usage.prompt_tokens || 0,
+                  output: parsed.usage.completion_tokens || 0
+                };
+              }
+            } catch {}
+          }
+        }
+      }
+
+      const parsedResult = safeJSONParse(extractJsonTextPayload(fullText), 'context_edit');
+      const rawPatch = parsedResult?.patch && typeof parsedResult.patch === 'object'
+        ? parsedResult.patch
+        : parsedResult;
+      const patch = pickContextPatchKeys(rawPatch);
+      const updatedKeys = Object.keys(patch);
+
+      if (!updatedKeys.length) {
+        throw new Error('AI did not return any writable context keys');
+      }
+
+      await writeProjectContext('_public', projectId, patch);
+
+      const responsePayload = {
+        summary: typeof parsedResult?.summary === 'string' && parsedResult.summary.trim()
+          ? parsedResult.summary.trim()
+          : `已更新项目上下文：${updatedKeys.join('、')}`,
+        updatedKeys,
+        patch
+      };
+
+      console.log(`[ContextEdit] Saved ${projectId}, keys=${updatedKeys.join(',')}`);
+      write({
+        type: 'done',
+        fullText: JSON.stringify(responsePayload),
+        fullThinking: fullThinking || null,
+        tokens
+      });
     } catch (err) {
-      console.error(`[Pipeline:${stepId}/stream] Error:`, err.message);
+      console.error('[ContextEdit] Error:', err.message);
       write({ type: 'error', error: err.message });
     }
+
     if (!res.writableEnded) res.end();
   });
-}
+};
+
+registerContextEditStreamRoute('/api/ai/forward/context-edit/stream');
+registerContextEditStreamRoute('/api/pipeline/context-edit/stream');
 
 // 动态配置API（必须在/:legacy之前）
 app.post('/api/config', (req, res) => {
@@ -2099,6 +3051,80 @@ app.post('/api/config', (req, res) => {
 
 app.get('/api/config', (req, res) => {
   res.json(runtimeConfig);
+});
+
+app.post('/api/fizzstudio/shot/queryPage', async (req, res) => {
+  try {
+    const queryPage = await forwardFizzdragonJson(
+      req,
+      `${FIZZDRAGON_STUDIO_BASE_URL}/api/user/shot/queryPage`,
+      req.body || {}
+    );
+
+    if (!queryPage.ok) {
+      return res.status(queryPage.status).json(queryPage.payload);
+    }
+
+    const hydratedPayload = await hydrateMissingShotRichText(req, queryPage.payload);
+    return res.status(queryPage.status).json(hydratedPayload);
+  } catch (error) {
+    console.error('[fizzstudio/queryShotList] proxy failed:', error);
+    return res.status(502).json({
+      code: 502,
+      message: 'Failed to query storyboard shots from upstream service',
+      error: error?.message || String(error),
+    });
+  }
+});
+
+app.post('/api/fizzstudio/ai/save/storyboard', async (req, res) => {
+  try {
+    const result = await forwardStoryboardSaveWithRetry(req, req.body || {});
+    return res.status(result.upstream?.status || 200).json(result.upstream?.payload || null);
+  } catch (error) {
+    console.error('[fizzstudio/saveStoryboard] proxy failed:', error);
+    return res.status(502).json({
+      code: 502,
+      success: false,
+      message: 'Failed to save storyboard through local proxy',
+      error: error?.message || String(error)
+    });
+  }
+});
+
+app.post('/api/fizzstudio/shotValue/input', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const upstream = await forwardFizzdragonJson(
+      req,
+      `${FIZZDRAGON_STUDIO_BASE_URL}/api/user/shotValue/input`,
+      {
+        shotId: payload.shotId,
+        shotColumnId: payload.shotColumnId,
+        value: payload.value || '',
+        values: payload.values
+      }
+    );
+
+    if (payload.presetColumnKey === 'scene') {
+      persistLocalSceneShadow(payload);
+      return res.status(200).json({
+        success: true,
+        code: 'SUCCESS',
+        message: '成功',
+        data: upstream?.payload?.data || null
+      });
+    }
+
+    return res.status(upstream.status).json(upstream.payload);
+  } catch (error) {
+    console.error('[fizzstudio/inputShotValue] proxy failed:', error);
+    return res.status(502).json({
+      code: 502,
+      message: 'Failed to write storyboard shot value through local proxy',
+      error: error?.message || String(error),
+    });
+  }
 });
 
 // 兼容旧API
@@ -2435,6 +3461,9 @@ ${needsJsonOutput(agentId) ? `**输出格式要求（JSON Agents）：**\n- 直�
       }
     }
     
+    const extracted = extractThinking(finalText);
+    finalText = extracted.content || finalText;
+
     console.log(`[${agent.name}] Done!`);
     res.json({ 
       result: finalText, 
@@ -2442,7 +3471,7 @@ ${needsJsonOutput(agentId) ? `**输出格式要求（JSON Agents）：**\n- 直�
       skillsUsed: agent.skills, 
       tokens: result.tokens, 
       totalTokens,
-      reasoning: result.reasoning  // 思考过程（如果有）
+      reasoning: extracted.thinking || null
     });
   } catch (err) {
     console.error(`[${agent.name}] Error:`, err.message);
@@ -3890,7 +4919,11 @@ console.log(`💾 用户项目存储: ${useSupabase ? '☁️ Supabase + 本地'
 
 // ========== 项目资产库 API（Asset Library） ==========
 
-import { readProjectContext, writeProjectContext } from './pipeline/services/project-context.js';
+import { readProjectContext, updateProjectData, writeProjectContext } from './pipeline/services/project-context.js';
+
+app.get('/', (req, res) => {
+  res.redirect('http://localhost:5173/');
+});
 
 /** 读取指定项目的 assetLibrary（从 user_projects 中提取） */
 function readProjectAssetLibrary(userId, projectId) {
@@ -3905,19 +4938,9 @@ function readProjectAssetLibrary(userId, projectId) {
 
 /** 写入 assetLibrary 到项目 JSON（使用 context 层的底层存储） */
 async function writeProjectAssetLibrary(userId, projectId, assetLibrary) {
-  const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
-  let projects = {};
-  if (existsSync(filePath)) {
-    projects = JSON.parse(readFileSync(filePath, 'utf-8'));
-  }
-  if (!projects[projectId]) projects[projectId] = {};
-  if (!projects[projectId].data) projects[projectId].data = {};
-  projects[projectId].data.assetLibrary = assetLibrary;
-  writeFileSync(filePath, JSON.stringify(projects, null, 2));
-
-  if (isSupabaseEnabled()) {
-    await saveUserProject(userId, projectId, projects[projectId]);
-  }
+  await updateProjectData(userId, projectId, async (project) => {
+    project.data.assetLibrary = assetLibrary;
+  });
 }
 
 // ── Project Context API（pipeline 全局状态） ──
@@ -3994,9 +5017,10 @@ app.get('/api/projects/:projectId/costumes', (req, res) => {
   res.json(lib?.costume_library || []);
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   const provider = PROVIDERS[currentProvider];
   console.log(`🎬 AI番劇 Agent Server v3 (Multi-Provider)`);
+  console.log(`   Host: ${HOST}`);
   console.log(`   Port: ${PORT}`);
   console.log(`   🤖 Provider: ${provider?.name || currentProvider}`);
   console.log(`   🔑 API Key: ${getApiKeyForProvider(currentProvider) ? '✅ 已配置' : '❌ 未找到 — 请检查 .env 中的 ' + currentProvider.toUpperCase() + '_API_KEY'}`);

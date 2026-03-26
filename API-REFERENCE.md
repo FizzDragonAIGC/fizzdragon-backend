@@ -206,7 +206,7 @@ data: {"type":"done","fullText":"完整CSV","fullThinking":"完整思考","token
 
 **CSV 输出格式（表头）：**
 ```
-ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characters,must_keep,no_add
+ep_id,source_range,episode_title,one_line_plot,setup,development,turn,hook,scene_list,characters,must_keep,no_add
 ```
 
 #### `POST /api/pipeline/screenplay/stream`
@@ -216,7 +216,7 @@ ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characte
 **Request:**
 ```json
 {
-  "episodeMappingRow": "E001,1-8,剧情摘要...",
+  "episodeMappingRow": "E001,1-8,初到潘多拉,剧情摘要...",
   "sourceText": "小说原文",
   "screenwriterMode": "shootable_90s_pro",
   "storyBible": { "meta": {...}, "characters": [...] }

@@ -16,6 +16,8 @@ if (!existsSync(USER_PROJECTS_DIR)) {
   mkdirSync(USER_PROJECTS_DIR, { recursive: true });
 }
 
+const fileWriteQueues = new Map();
+
 /**
  * Read the full context object for a project
  * Falls back to '_public' storage if user-specific context not found
@@ -30,7 +32,12 @@ export function readProjectContext(userId, projectId) {
       const projects = JSON.parse(readFileSync(filePath, 'utf-8'));
       const project = projects[projectId];
       const ctx = project?.data?.context;
-      if (ctx && Object.keys(ctx).length > 0) return ctx;
+      const assetLibrary = project?.data?.assetLibrary || project?.assetLibrary;
+      const merged = {
+        ...(ctx && typeof ctx === 'object' ? ctx : {}),
+        ...(assetLibrary ? { assetLibrary } : {})
+      };
+      if (Object.keys(merged).length > 0) return merged;
     } catch { /* continue to fallback */ }
   }
   return null;
@@ -39,24 +46,12 @@ export function readProjectContext(userId, projectId) {
 // Keys whose values are plain objects and should be deep-merged (not overwritten)
 const DEEP_MERGE_KEYS = new Set(['screenplays']);
 
-/**
- * Merge-write a partial context into the project's data.context
- * Only overwrites keys present in `patch`; leaves untouched keys as-is.
- * Keys listed in DEEP_MERGE_KEYS are merged one level deeper (Object.assign on sub-object).
- */
-export async function writeProjectContext(userId, projectId, patch) {
-  const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
-  let projects = {};
-  if (existsSync(filePath)) {
-    projects = JSON.parse(readFileSync(filePath, 'utf-8'));
-  }
-  if (!projects[projectId]) projects[projectId] = {};
-  if (!projects[projectId].data) projects[projectId].data = {};
-  if (!projects[projectId].data.context) projects[projectId].data.context = {};
+function readProjectsFile(filePath) {
+  if (!existsSync(filePath)) return {};
+  return JSON.parse(readFileSync(filePath, 'utf-8'));
+}
 
-  const ctx = projects[projectId].data.context;
-
-  // Merge patch into existing context, with deep merge for specific keys
+function mergeContextPatch(ctx, patch) {
   for (const [k, v] of Object.entries(patch)) {
     if (DEEP_MERGE_KEYS.has(k) && v && typeof v === 'object' && !Array.isArray(v)
         && ctx[k] && typeof ctx[k] === 'object' && !Array.isArray(ctx[k])) {
@@ -65,11 +60,53 @@ export async function writeProjectContext(userId, projectId, patch) {
       ctx[k] = v;
     }
   }
+}
 
-  writeFileSync(filePath, JSON.stringify(projects, null, 2));
+function enqueueFileWrite(filePath, operation) {
+  const previous = fileWriteQueues.get(filePath) || Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(operation);
 
-  // Sync to Supabase
-  if (isSupabaseEnabled()) {
-    await saveUserProject(userId, projectId, projects[projectId]);
-  }
+  fileWriteQueues.set(filePath, next);
+
+  return next.finally(() => {
+    if (fileWriteQueues.get(filePath) === next) {
+      fileWriteQueues.delete(filePath);
+    }
+  });
+}
+
+export async function updateProjectData(userId, projectId, updater) {
+  const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
+  return enqueueFileWrite(filePath, async () => {
+    const projects = readProjectsFile(filePath);
+    if (!projects[projectId]) projects[projectId] = {};
+    if (!projects[projectId].data) projects[projectId].data = {};
+
+    await updater(projects[projectId], projects);
+
+    writeFileSync(filePath, JSON.stringify(projects, null, 2));
+
+    if (isSupabaseEnabled()) {
+      await saveUserProject(userId, projectId, projects[projectId]);
+    }
+
+    return projects[projectId];
+  });
+}
+
+/**
+ * Merge-write a partial context into the project's data.context
+ * Only overwrites keys present in `patch`; leaves untouched keys as-is.
+ * Keys listed in DEEP_MERGE_KEYS are merged one level deeper (Object.assign on sub-object).
+ */
+export async function writeProjectContext(userId, projectId, patch) {
+  return updateProjectData(userId, projectId, async (project) => {
+    if (!project.data.context) project.data.context = {};
+
+    const ctx = project.data.context;
+    mergeContextPatch(ctx, patch);
+    return ctx;
+  });
 }

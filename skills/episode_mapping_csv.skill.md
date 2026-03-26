@@ -16,21 +16,23 @@ This CSV is the *single source of truth* for downstream writing. Once approved, 
 - First line must be the header exactly:
 
 ```
-ep_id,arc_block,source_range,one_line_plot,setup,development,turn,hook,characters,must_keep,no_add,scene_plan_min
+ep_id,source_range,episode_title,one_line_plot,setup,development,turn,hook,scene_list,characters,must_keep,no_add
 ```
 
-- Then output exactly **N rows** (e.g., 80 rows for E001–E080), one episode per line.
+- Then output exactly **N rows** for the requested episode range, one episode per line.
+- `source_range` is authoritative input and must be reused exactly when the caller provides it explicitly; do not rewrite line ranges on your own.
+- `episode_title` is a display title, not a generic label like “第X集” or low-information filler such as “镜头切至”.
 
 ## Field Requirements
-- `ep_id`: E001..E080
-- `arc_block`: A1..A8 (10 episodes per block)
-- `source_range`: like `206-312` (preferred) or chapter block
-- `one_line_plot`: one sentence: what happens this episode
+- `ep_id`: E001..E080 (or the requested episode slice)
+- `source_range`: like `206-312`
+- `episode_title`: one concise display title for this episode, not a chapter label shell
+- `one_line_plot`: one sentence: what happens this episode; cannot degrade into a title repeat
 - `setup/development/turn/hook`: short, concrete, plot-true
+- `scene_list`: 3–6 planned scenes, separated by `;`, preferably slugline-like scene anchors
 - `characters`: 2–5 names/roles separated by `;`
 - `must_keep`: 3–6 items separated by `;`
 - `no_add`: 1–3 forbidden additions, separated by `;`
-- `scene_plan_min`: integer 3–6 (for 90s episodes)
 
 ## Guidance (80 x 1.5 min)
 - Each episode should be 3–6 scenes.

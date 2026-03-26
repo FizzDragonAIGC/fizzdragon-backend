@@ -178,7 +178,7 @@ export function buildOpenApiSpec(baseUrl = '') {
             '200': jsonResponse(
               genericSyncResponse,
               {
-                result: 'ep_id,source_range,one_line_plot,setup,development,turn,hook,scene_list,characters,must_keep,no_add\nE001,11-191,杰克·舒利在弗吉尼亚州医院回忆过去的飞行梦...',
+                result: 'ep_id,source_range,episode_title,one_line_plot,setup,development,turn,hook,scene_list,characters,must_keep,no_add\nE001,11-191,失翼老兵,杰克·舒利在弗吉尼亚州医院回忆过去的飞行梦...',
                 reasoning: null,
                 tokens: { input: 22330, output: 738 },
                 step: 'breakdown',
@@ -202,7 +202,7 @@ export function buildOpenApiSpec(baseUrl = '') {
             }
           ),
           responses: {
-            '200': streamResponse(':ok\n\ndata: {"type":"chunk","content":"ep_id,source_range,one_line_plot"}\n\ndata: {"type":"done","fullText":"ep_id,source_range,one_line_plot\\nE001,...","tokens":{"input":2000,"output":700}}\n')
+            '200': streamResponse(':ok\n\ndata: {"type":"chunk","content":"ep_id,source_range,episode_title,one_line_plot"}\n\ndata: {"type":"done","fullText":"ep_id,source_range,episode_title,one_line_plot\\nE001,...","tokens":{"input":2000,"output":700}}\n')
           }
         }
       },
@@ -217,7 +217,7 @@ export function buildOpenApiSpec(baseUrl = '') {
             {
               projectId: 'avatar_full_test',
               episodeIndex: 1,
-              episodeMappingRow: 'E002,192-473,杰克得知哥哥汤米去世的消息，并被招募前往潘多拉星球。',
+              episodeMappingRow: 'E002,192-473,远赴潘多拉,杰克得知哥哥汤米去世的消息，并被招募前往潘多拉星球。',
               sourceText: 'ep_id: E002\nsource_range: 192-473\none_line_plot: 杰克得知哥哥汤米去世的消息...',
               screenwriterMode: 'shootable_90s_pro'
             }

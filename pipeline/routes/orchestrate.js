@@ -1,13 +1,44 @@
 import { buildPipelinePrompt } from '../services/prompt-builder.js';
+import { ensureNovelTextFromAttachment } from '../services/attachment-to-text.js';
+import { normalizePipelineStepOutput } from '../services/output-normalizer.js';
 import { createSSEWriter, startHeartbeat } from '../utils/sse.js';
 
-export function registerOrchestrateRoute(router, deps) {
-  const { callClaudeWithStreaming } = deps;
-  const noopAuth = (req, res, next) => next();
+function resolveOrchestrateModel(stepId, deps) {
+  const providerId = typeof deps.getCurrentProvider === 'function'
+    ? deps.getCurrentProvider()
+    : 'anthropic';
+  const provider = deps.PROVIDERS?.[providerId];
+  if (!provider?.models) return undefined;
 
-  router.post('/run', noopAuth, async (req, res) => {
+  // Story Bible extraction blocks the whole run chain; prefer lower latency here.
+  if (stepId === 'extract-bible') {
+    return provider.models.standard || provider.models.fast || provider.models.best;
+  }
+
+  const longOutputSteps = new Set(['extract-bible', 'breakdown', 'screenplay', 'extract-assets', 'storyboard', 'design-characters']);
+  return longOutputSteps.has(stepId)
+    ? (provider.models.best || provider.models.standard)
+    : provider.models.standard;
+}
+
+export function createOrchestrateHandler(deps) {
+  const { callClaudeWithStreaming } = deps;
+
+  return async (req, res) => {
     const writer = createSSEWriter(res, req);
     const stopHeartbeat = startHeartbeat(writer);
+
+    if (!writer.closed) {
+      try {
+        res.write(':ok\n\n');
+      } catch {
+        stopHeartbeat();
+        writer.end();
+        return;
+      }
+    }
+
+    await ensureNovelTextFromAttachment(req.body);
 
     const { novelText, totalEpisodes = 80, steps: requestedSteps } = req.body;
 
@@ -21,6 +52,7 @@ export function registerOrchestrateRoute(router, deps) {
 
         const stepId = stepsToRun[i];
         writer.write({ type: 'step_start', step: stepId, stepIndex: i, totalSteps: stepsToRun.length });
+        await new Promise((resolve) => setImmediate(resolve));
 
         // Build body for this step based on previous results
         let stepBody;
@@ -40,7 +72,13 @@ export function registerOrchestrateRoute(router, deps) {
             };
             break;
           case 'breakdown':
-            stepBody = { novelText, totalEpisodes, storyBible };
+            stepBody = {
+              novelText,
+              totalEpisodes,
+              storyBible,
+              breakdownStartEpisode: req.body.breakdownStartEpisode,
+              breakdownEndEpisode: req.body.breakdownEndEpisode
+            };
             break;
           case 'screenplay':
             stepBody = { ...req.body, storyBible };
@@ -54,7 +92,7 @@ export function registerOrchestrateRoute(router, deps) {
           case 'storyboard':
             stepBody = {
               screenplay: results.screenplay || req.body.screenplay,
-              assets: results['extract-assets'] || req.body.assets,
+              assets: results['extract-assets'] || req.body.assets || req.body.assetLibrary,
               storyBible
             };
             break;
@@ -66,9 +104,10 @@ export function registerOrchestrateRoute(router, deps) {
           const { systemPrompt, userMessage, agentId } = buildPipelinePrompt(stepId, stepBody, deps);
           let stepThinking = '';
           let stepContent = '';
+          const model = resolveOrchestrateModel(stepId, deps);
 
           await callClaudeWithStreaming(systemPrompt, userMessage, agentId, {
-            model: 'claude-sonnet-4-20250514',
+            ...(model ? { model } : {}),
             maxTokens: 16000
           }, {
             onThinking: (chunk) => {
@@ -80,21 +119,28 @@ export function registerOrchestrateRoute(router, deps) {
               writer.write({ type: 'chunk', step: stepId, content: chunk });
             },
             onDone: (fullText, fullThinking, tokens) => {
+              const normalized = normalizePipelineStepOutput(stepId, fullText, stepBody);
+              if (normalized.error) {
+                writer.write({ type: 'error', step: stepId, error: normalized.error, details: normalized.details, raw: normalized.raw, recoverable: true });
+                return;
+              }
+
+              const normalizedText = normalized.result;
               // For extract-bible, try to parse JSON for downstream use
-              let resultValue = fullText;
+              let resultValue = normalizedText;
               if (stepId === 'extract-bible') {
                 try {
-                  resultValue = JSON.parse(fullText);
+                  resultValue = JSON.parse(normalizedText);
                 } catch {
                   // Try to extract JSON from response
-                  const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+                  const jsonMatch = normalizedText.match(/\{[\s\S]*\}/);
                   if (jsonMatch) {
                     try { resultValue = JSON.parse(jsonMatch[0]); } catch { /* keep as string */ }
                   }
                 }
               }
               results[stepId] = resultValue;
-              writer.write({ type: 'step_complete', step: stepId, result: fullText, thinking: fullThinking, tokens });
+              writer.write({ type: 'step_complete', step: stepId, result: normalizedText, thinking: fullThinking, tokens });
             },
             onError: (err) => {
               writer.write({ type: 'error', step: stepId, error: err.message, recoverable: true });
@@ -112,5 +158,9 @@ export function registerOrchestrateRoute(router, deps) {
 
     stopHeartbeat();
     writer.end();
-  });
+  };
+}
+
+export function registerOrchestrateRoute(router, deps) {
+  router.post('/run', createOrchestrateHandler(deps));
 }
