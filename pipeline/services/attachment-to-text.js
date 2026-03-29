@@ -130,21 +130,34 @@ async function extractTextFromFile(filePath, extension) {
 async function resolveAttachmentFile(body) {
   const attachmentUrl = String(body?.novelAttachmentUrl || '').trim();
   if (attachmentUrl) {
-    return downloadRemoteAttachment(attachmentUrl, body?.novelAttachmentName);
+    return {
+      ...(await downloadRemoteAttachment(attachmentUrl, body?.novelAttachmentName)),
+      sourceType: 'remote-url',
+      source: attachmentUrl
+    };
   }
 
   const attachmentPath = String(body?.novelAttachment || '').trim();
   if (!attachmentPath) return null;
 
   if (existsSync(attachmentPath)) {
-    return { filePath: attachmentPath, cleanup: null };
+    return {
+      filePath: attachmentPath,
+      cleanup: null,
+      sourceType: 'local-file',
+      source: attachmentPath
+    };
   }
 
   const candidateUrls = buildCandidateUrls(attachmentPath);
   let lastError = null;
   for (const candidateUrl of candidateUrls) {
     try {
-      return await downloadRemoteAttachment(candidateUrl, body?.novelAttachmentName || attachmentPath);
+      return {
+        ...(await downloadRemoteAttachment(candidateUrl, body?.novelAttachmentName || attachmentPath)),
+        sourceType: 'remote-candidate',
+        source: candidateUrl
+      };
     } catch (error) {
       lastError = error;
     }
@@ -157,8 +170,13 @@ async function resolveAttachmentFile(body) {
   throw new Error('Attachment source is not readable');
 }
 
-export async function ensureNovelTextFromAttachment(body) {
+export async function ensureNovelTextFromAttachment(body, options = {}) {
+  const logger = options.logger;
+
   if (normalizeText(body?.novelText)) {
+    logger?.debug?.('Novel text already present; skip attachment extraction', {
+      novelTextLength: String(body?.novelText || '').trim().length
+    });
     return body.novelText;
   }
 
@@ -167,15 +185,30 @@ export async function ensureNovelTextFromAttachment(body) {
 
   const extension = guessExtension(resolved.filePath, body?.novelAttachmentName || body?.novelAttachmentUrl || body?.novelAttachment);
   try {
+    logger?.info?.('Resolved novel attachment', {
+      sourceType: resolved.sourceType,
+      source: resolved.source,
+      filePath: resolved.filePath,
+      extension
+    });
     const extractedText = await extractTextFromFile(resolved.filePath, extension);
     if (!extractedText) {
       throw new Error('Attachment text extraction returned empty content');
     }
     body.novelText = extractedText;
+    logger?.info?.('Extracted novel text from attachment', {
+      sourceType: resolved.sourceType,
+      extension,
+      extractedTextLength: extractedText.length
+    });
     return extractedText;
   } finally {
     if (typeof resolved.cleanup === 'function') {
       await resolved.cleanup();
+      logger?.debug?.('Cleaned up temporary attachment file', {
+        sourceType: resolved.sourceType,
+        source: resolved.source
+      });
     }
   }
 }

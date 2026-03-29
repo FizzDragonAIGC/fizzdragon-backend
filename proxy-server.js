@@ -2558,6 +2558,14 @@ ${truncatedContent}`;
 // ========== Pipeline API (modular) ==========
 import { createPipelineRouter } from './pipeline/index.js';
 import { createOrchestrateHandler } from './pipeline/routes/orchestrate.js';
+import {
+  attachResponseLogging,
+  createRequestLogger,
+  summarizeError,
+  summarizeNormalization,
+  summarizePipelineBody,
+  summarizeTokens
+} from './pipeline/utils/logger.js';
 const pipelineRouter = createPipelineRouter({
   AGENTS, loadAgentSkills, needsJsonOutput,
   callClaude, callClaudeWithStreaming,
@@ -2638,7 +2646,15 @@ app.post('/api/ai/forward/run', orchestrateHandler);
 
 for (const stepId of PIPELINE_STEPS) {
   const streamHandler = async (req, res) => {
-    console.log(`[Pipeline:${stepId}/stream] Request received`);
+    const requestLogger = createRequestLogger(req, res, {
+      route: 'pipeline.stream.inline',
+      stepId
+    });
+    const startedAt = attachResponseLogging(req, res, requestLogger);
+
+    requestLogger.info('Pipeline stream request received', {
+      request: summarizePipelineBody(req.body)
+    });
 
     // Auto-inject project context when projectId is provided
     if (req.body.projectId) {
@@ -2646,12 +2662,18 @@ for (const stepId of PIPELINE_STEPS) {
       const ctx = readProjectContext(userId, req.body.projectId);
       const disabledContextKeys = new Set(Array.isArray(req.body.disableContextKeys) ? req.body.disableContextKeys : []);
       if (ctx) {
+        const injectedKeys = [];
         for (const [k, v] of Object.entries(ctx)) {
           if (disabledContextKeys.has(k)) continue;
-          if (req.body[k] === undefined && v != null) req.body[k] = v;
+          if (req.body[k] === undefined && v != null) {
+            req.body[k] = v;
+            injectedKeys.push(k);
+          }
         }
-        const injectedKeys = Object.keys(ctx).filter((key) => !disabledContextKeys.has(key));
-        console.log(`[Pipeline:${stepId}/stream] Injected context keys: ${injectedKeys.join(',')}`);
+        requestLogger.info('Injected project context', {
+          injectedKeys,
+          disabledContextKeys: Array.from(disabledContextKeys)
+        });
       }
     }
 
@@ -2669,6 +2691,10 @@ for (const stepId of PIPELINE_STEPS) {
 
     const writeDeterministicCharacterCostume = (reason) => {
       const deterministicAssets = buildDeterministicCharacterCostume(req.body);
+      requestLogger.warn('Used deterministic character costume stream fallback', {
+        reason,
+        durationMs: Date.now() - startedAt
+      });
       write({
         type: 'thinking',
         content: reason || '角色设计改为本地确定性生成，避免流式返回无效内容。'
@@ -2692,14 +2718,17 @@ for (const stepId of PIPELINE_STEPS) {
       if (stepId === 'design-characters' && shouldPreferDeterministicCharacterCostume(req.body)) {
         // DashScope long-form character-costume streaming is known to emit invalid zero chunks here.
         writeDeterministicCharacterCostume('角色设计改为本地确定性生成，避免长文本流式返回无效内容。');
-        console.warn(`[Pipeline:${stepId}/stream] Deterministic path used for long DashScope character costume generation`);
         if (!res.writableEnded) res.end();
         return;
       }
 
       const deps = { AGENTS, loadAgentSkills, needsJsonOutput, buildSourceRanges };
       const { systemPrompt, userMessage, agentId, options = {} } = buildPipelinePrompt(stepId, req.body, deps);
-      console.log(`[Pipeline:${stepId}/stream] Calling ${agentId}`);
+      requestLogger.info('Dispatching inline pipeline stream call', {
+        agentId,
+        systemPromptLength: systemPrompt.length,
+        userMessageLength: userMessage.length
+      });
 
       const providerId = req.body.provider && PROVIDERS[req.body.provider]
         ? req.body.provider
@@ -2710,7 +2739,18 @@ for (const stepId of PIPELINE_STEPS) {
       const longOutputAgents = ['storyboard', 'storyboard_csv', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner', 'aggregate', 'story_breakdown_pack', 'asset_extractor', 'asset_extractor_repair'];
       const model = resolveOpenAICompatibleModel(provider, providerId, agentId, options, false, longOutputAgents);
       const generationSettings = resolveGenerationSettings(agentId, options, providerId);
-      console.log(`[Pipeline:${stepId}/stream] Using ${provider.name} model=${model}, prompt=${systemPrompt.length}+${userMessage.length} chars`);
+      let thinkingStarted = false;
+      let contentStarted = false;
+
+      requestLogger.info('Resolved stream provider configuration', {
+        agentId,
+        providerId,
+        providerName: provider.name,
+        model,
+        baseUrl,
+        hasApiKey: Boolean(apiKey),
+        generationSettings
+      });
 
       const apiResp = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
@@ -2726,7 +2766,12 @@ for (const stepId of PIPELINE_STEPS) {
         const errText = await apiResp.text().catch(() => '');
         throw new Error(`${provider.name} API error: ${apiResp.status} ${errText}`);
       }
-      console.log(`[Pipeline:${stepId}/stream] API response status: ${apiResp.status}`);
+      requestLogger.info('Provider stream endpoint responded', {
+        providerId,
+        providerName: provider.name,
+        model,
+        statusCode: apiResp.status
+      });
 
       const detector = new ThinkingStreamDetector();
       let fullText = '', fullThinking = '', inputTokens = 0, outputTokens = 0;
@@ -2744,9 +2789,25 @@ for (const stepId of PIPELINE_STEPS) {
               for (const event of events) {
                 if (event.type === 'thinking') {
                   fullThinking += event.text;
+                  if (!thinkingStarted) {
+                    thinkingStarted = true;
+                    requestLogger.info('Thinking stream started', {
+                      providerId,
+                      model,
+                      firstChunkLength: event.text.length
+                    });
+                  }
                   write({ type: 'thinking', content: event.text });
                 } else {
                   fullText += event.text;
+                  if (!contentStarted) {
+                    contentStarted = true;
+                    requestLogger.info('Content stream started', {
+                      providerId,
+                      model,
+                      firstChunkLength: event.text.length
+                    });
+                  }
                   write({ type: 'chunk', content: event.text });
                 }
               }
@@ -2772,6 +2833,9 @@ for (const stepId of PIPELINE_STEPS) {
       let normalized = normalizePipelineStepOutput(stepId, fullText, req.body);
       if (normalized.error) {
         if (stepId === 'extract-assets') {
+          requestLogger.warn('Extract-assets normalization failed; invoking repair agent', {
+            normalization: summarizeNormalization(normalized)
+          });
           try {
             const repairPrompt = buildExtractAssetsRepairPrompt(req.body, normalized, { AGENTS, loadAgentSkills });
             const repairResult = await callClaude(
@@ -2787,10 +2851,15 @@ for (const stepId of PIPELINE_STEPS) {
               outputTokens += repairResult.tokens?.output || 0;
             }
           } catch (repairError) {
-            console.warn(`[Pipeline:${stepId}/stream] Repair attempt failed: ${repairError.message}`);
+            requestLogger.warn('Extract-assets repair attempt failed', {
+              error: summarizeError(repairError)
+            });
           }
         }
         if (stepId === 'storyboard' && normalized.error === 'storyboard_csv_malformed') {
+          requestLogger.warn('Storyboard normalization failed; invoking repair agent', {
+            normalization: summarizeNormalization(normalized)
+          });
           try {
             const repairPrompt = buildStoryboardRepairPrompt(req.body, normalized, { AGENTS, loadAgentSkills });
             const repairResult = await callClaude(
@@ -2806,22 +2875,38 @@ for (const stepId of PIPELINE_STEPS) {
               outputTokens += repairResult.tokens?.output || 0;
             }
           } catch (repairError) {
-            console.warn(`[Pipeline:${stepId}/stream] Storyboard repair attempt failed: ${repairError.message}`);
+            requestLogger.warn('Storyboard repair attempt failed', {
+              error: summarizeError(repairError)
+            });
           }
         }
       }
       if (normalized.error) {
         if (stepId === 'design-characters') {
           writeDeterministicCharacterCostume('角色设计模型结果解析失败，已自动切换为本地确定性生成。');
-          console.warn(`[Pipeline:${stepId}/stream] Deterministic fallback used after normalization error: ${normalized.error}`);
           if (!res.writableEnded) res.end();
           return;
         }
+        requestLogger.warn('Inline stream normalization failed', {
+          providerId,
+          model,
+          tokens: summarizeTokens({ input: inputTokens, output: outputTokens }),
+          normalization: summarizeNormalization(normalized),
+          durationMs: Date.now() - startedAt
+        });
         write({ type: 'error', error: normalized.error, details: normalized.details, raw: normalized.raw });
         if (!res.writableEnded) res.end();
         return;
       }
       fullText = normalized.result;
+      requestLogger.info('Inline stream completed', {
+        providerId,
+        providerName: provider.name,
+        model,
+        tokens: summarizeTokens({ input: inputTokens, output: outputTokens }),
+        normalization: summarizeNormalization(normalized),
+        durationMs: Date.now() - startedAt
+      });
       write({ type: 'done', fullText, fullThinking: fullThinking || null, tokens: { input: inputTokens, output: outputTokens } });
 
       // Write back generated screenplay to project-context for cross-episode continuity
@@ -2829,8 +2914,18 @@ for (const stepId of PIPELINE_STEPS) {
         const epIdx = req.body.episodeIndex;
         writeProjectContext('_public', req.body.projectId, {
           screenplays: { [epIdx]: fullText }
-        }).catch(err => console.error(`[Pipeline:screenplay/stream] Context writeback failed:`, err.message));
-        console.log(`[Pipeline:screenplay/stream] Wrote back screenplay for episode ${epIdx}`);
+        })
+          .then(() => {
+            requestLogger.info('Screenplay written back to project context', {
+              episodeIndex: epIdx
+            });
+          })
+          .catch((err) => {
+            requestLogger.error('Screenplay context writeback failed', {
+              episodeIndex: epIdx,
+              error: summarizeError(err)
+            });
+          });
       }
       } catch (err) {
         if (stepId === 'breakdown' && shouldUseDeterministicBreakdownFallback(err)) {
@@ -2844,15 +2939,25 @@ for (const stepId of PIPELINE_STEPS) {
               agent: 'deterministic_breakdown_fallback',
               provider: 'deterministic-local'
             });
-            console.warn(`[Pipeline:${stepId}/stream] Deterministic fallback used: ${err.message}`);
+            requestLogger.warn('Used deterministic breakdown stream fallback', {
+              error: summarizeError(err),
+              durationMs: Date.now() - startedAt
+            });
             if (!res.writableEnded) res.end();
             return;
           } catch (fallbackErr) {
-            console.error(`[Pipeline:${stepId}/stream] Deterministic fallback failed:`, fallbackErr.message);
+            requestLogger.error('Deterministic breakdown stream fallback failed', {
+              error: summarizeError(fallbackErr),
+              durationMs: Date.now() - startedAt
+            });
           }
         }
 
-        console.error(`[Pipeline:${stepId}/stream] Error:`, err.message);
+        requestLogger.error('Pipeline inline stream request failed', {
+          error: summarizeError(err),
+          request: summarizePipelineBody(req.body),
+          durationMs: Date.now() - startedAt
+        });
         write({ type: 'error', error: err.message });
       }
     if (!res.writableEnded) res.end();

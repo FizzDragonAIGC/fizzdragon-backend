@@ -5,6 +5,14 @@ import { normalizePipelineStepOutput } from '../services/output-normalizer.js';
 import { buildDeterministicBreakdownCsv, shouldUseDeterministicBreakdownFallback } from '../services/deterministic-breakdown.js';
 import { buildDeterministicCharacterCostume, shouldPreferDeterministicCharacterCostume } from '../services/deterministic-character-costume.js';
 import { ensureNovelTextFromAttachment } from '../services/attachment-to-text.js';
+import {
+  attachResponseLogging,
+  createRequestLogger,
+  summarizeError,
+  summarizeNormalization,
+  summarizePipelineBody,
+  summarizeTokens
+} from '../utils/logger.js';
 
 function sumTokens(...tokenSets) {
   return tokenSets.reduce((acc, tokens) => ({
@@ -62,7 +70,7 @@ function buildStoryboardRepairPrompt(body, normalized, deps = {}) {
   };
 }
 
-function injectProjectContext(reqBody, ctx, stepId) {
+function injectProjectContext(reqBody, ctx, logger) {
   const disabledContextKeys = new Set(Array.isArray(reqBody?.disableContextKeys) ? reqBody.disableContextKeys : []);
   const injectedKeys = [];
 
@@ -74,7 +82,10 @@ function injectProjectContext(reqBody, ctx, stepId) {
     }
   }
 
-  console.log(`[Pipeline:${stepId}] Injected context keys: ${injectedKeys.join(',')}`);
+  logger.info('Injected project context', {
+    injectedKeys,
+    disabledContextKeys: Array.from(disabledContextKeys)
+  });
 }
 
 export function registerSyncRoutes(router, deps) {
@@ -82,12 +93,14 @@ export function registerSyncRoutes(router, deps) {
 
   for (const stepId of PIPELINE_STEPS) {
     router.post(`/${stepId}`, async (req, res) => {
-      const startedAt = Date.now();
-      res.on('finish', () => {
-        console.log(`[Pipeline:${stepId}] Response finished in ${Date.now() - startedAt}ms`);
+      const requestLogger = createRequestLogger(req, res, {
+        route: 'pipeline.sync',
+        stepId
       });
-      res.on('close', () => {
-        console.log(`[Pipeline:${stepId}] Response closed in ${Date.now() - startedAt}ms`);
+      const startedAt = attachResponseLogging(req, res, requestLogger);
+
+      requestLogger.info('Pipeline sync request received', {
+        request: summarizePipelineBody(req.body)
       });
 
       // Auto-inject project context when projectId is provided
@@ -95,13 +108,15 @@ export function registerSyncRoutes(router, deps) {
         const userId = '_public';
         const ctx = readProjectContext(userId, req.body.projectId);
         if (ctx) {
-          injectProjectContext(req.body, ctx, stepId);
+          injectProjectContext(req.body, ctx, requestLogger);
         }
       }
 
       try {
         if ((stepId === 'extract-bible' || stepId === 'breakdown') && !String(req.body?.novelText || '').trim()) {
-          await ensureNovelTextFromAttachment(req.body);
+          await ensureNovelTextFromAttachment(req.body, {
+            logger: requestLogger.child({ phase: 'attachment' })
+          });
         }
 
         if (stepId === 'design-characters' && shouldPreferDeterministicCharacterCostume(req.body)) {
@@ -119,16 +134,26 @@ export function registerSyncRoutes(router, deps) {
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
           res.setHeader('Content-Length', Buffer.byteLength(body, 'utf8'));
           res.end(body);
-          console.warn(`[Pipeline:${stepId}] Deterministic path used for long DashScope character costume generation`);
+          requestLogger.warn('Used deterministic character costume path', {
+            reason: 'long_dashscope_character_costume',
+            durationMs: Date.now() - startedAt
+          });
           return;
         }
 
         const { systemPrompt, userMessage, agentId, options } = buildPipelinePrompt(stepId, req.body, deps);
-        console.log(`[Pipeline:${stepId}] Calling ${agentId}...`);
         const lockedProvider = req.body.provider || (typeof deps.getCurrentProvider === 'function' ? deps.getCurrentProvider() : '');
         const requestOptions = lockedProvider
           ? { ...options, provider: lockedProvider, disableFallback: true }
           : options;
+
+        requestLogger.info('Dispatching pipeline sync call', {
+          agentId,
+          provider: lockedProvider || null,
+          systemPromptLength: systemPrompt.length,
+          userMessageLength: userMessage.length,
+          requestOptions
+        });
 
         const result = await callClaude(systemPrompt, userMessage, agentId, requestOptions);
         let effectiveResult = result;
@@ -141,7 +166,17 @@ export function registerSyncRoutes(router, deps) {
         const sanitize = sanitizeForJson || (t => t);
         let normalized = normalizePipelineStepOutput(stepId, sanitize(content), req.body);
 
+        requestLogger.info('Primary model response received', {
+          agentId,
+          provider: result.provider || lockedProvider || null,
+          tokens: summarizeTokens(result.tokens),
+          normalization: summarizeNormalization(normalized)
+        });
+
         if (stepId === 'extract-assets' && normalized.error) {
+          requestLogger.warn('Extract-assets normalization failed; invoking repair agent', {
+            normalization: summarizeNormalization(normalized)
+          });
           const repairPrompt = buildExtractAssetsRepairPrompt(req.body, normalized, deps);
           const repairResult = await callClaude(
             repairPrompt.systemPrompt,
@@ -156,9 +191,18 @@ export function registerSyncRoutes(router, deps) {
             tokens: sumTokens(result.tokens, repairResult.tokens),
             provider: repairResult.provider || result.provider
           };
+          requestLogger.info('Extract-assets repair completed', {
+            repairAgentId: repairPrompt.agentId,
+            provider: repairResult.provider || null,
+            tokens: summarizeTokens(effectiveResult.tokens),
+            normalization: summarizeNormalization(normalized)
+          });
         }
 
         if (stepId === 'storyboard' && normalized.error === 'storyboard_csv_malformed') {
+          requestLogger.warn('Storyboard normalization failed; invoking repair agent', {
+            normalization: summarizeNormalization(normalized)
+          });
           const repairPrompt = buildStoryboardRepairPrompt(req.body, normalized, deps);
           const repairResult = await callClaude(
             repairPrompt.systemPrompt,
@@ -173,6 +217,12 @@ export function registerSyncRoutes(router, deps) {
             tokens: sumTokens(result.tokens, repairResult.tokens),
             provider: repairResult.provider || result.provider
           };
+          requestLogger.info('Storyboard repair completed', {
+            repairAgentId: repairPrompt.agentId,
+            provider: repairResult.provider || null,
+            tokens: summarizeTokens(effectiveResult.tokens),
+            normalization: summarizeNormalization(normalized)
+          });
         }
 
         if (normalized.error) {
@@ -191,9 +241,16 @@ export function registerSyncRoutes(router, deps) {
             res.setHeader('Content-Type', 'application/json; charset=utf-8');
             res.setHeader('Content-Length', Buffer.byteLength(body, 'utf8'));
             res.end(body);
-            console.warn(`[Pipeline:${stepId}] Deterministic fallback used after normalization error: ${normalized.error}`);
+            requestLogger.warn('Used deterministic character costume fallback after normalization error', {
+              normalization: summarizeNormalization(normalized),
+              durationMs: Date.now() - startedAt
+            });
             return;
           }
+          requestLogger.warn('Pipeline sync normalization failed', {
+            normalization: summarizeNormalization(normalized),
+            durationMs: Date.now() - startedAt
+          });
           const payload = {
             error: normalized.error,
             step: stepId,
@@ -222,9 +279,27 @@ export function registerSyncRoutes(router, deps) {
           const epIdx = req.body.episodeIndex;
           writeProjectContext('_public', req.body.projectId, {
             screenplays: { [epIdx]: normalized.result }
-          }).catch(err => console.error(`[Pipeline:screenplay] Context writeback failed:`, err.message));
-          console.log(`[Pipeline:screenplay] Wrote back screenplay for episode ${epIdx}`);
+          })
+            .then(() => {
+              requestLogger.info('Screenplay written back to project context', {
+                episodeIndex: epIdx
+              });
+            })
+            .catch((err) => {
+              requestLogger.error('Screenplay context writeback failed', {
+                episodeIndex: epIdx,
+                error: summarizeError(err)
+              });
+            });
         }
+
+        requestLogger.info('Pipeline sync request completed', {
+          agentId,
+          provider: effectiveResult.provider || req.body.provider || null,
+          tokens: summarizeTokens(effectiveResult.tokens),
+          normalization: summarizeNormalization(normalized),
+          durationMs: Date.now() - startedAt
+        });
 
         const body = JSON.stringify(payload);
         res.status(200);
@@ -248,14 +323,24 @@ export function registerSyncRoutes(router, deps) {
             res.setHeader('Content-Type', 'application/json; charset=utf-8');
             res.setHeader('Content-Length', Buffer.byteLength(body, 'utf8'));
             res.end(body);
-            console.warn(`[Pipeline:${stepId}] Deterministic fallback used: ${err.message}`);
+            requestLogger.warn('Used deterministic breakdown fallback', {
+              error: summarizeError(err),
+              durationMs: Date.now() - startedAt
+            });
             return;
           } catch (fallbackErr) {
-            console.error(`[Pipeline:${stepId}] Deterministic fallback failed:`, fallbackErr.message);
+            requestLogger.error('Deterministic breakdown fallback failed', {
+              error: summarizeError(fallbackErr),
+              durationMs: Date.now() - startedAt
+            });
           }
         }
 
-        console.error(`[Pipeline:${stepId}] Error:`, err.message);
+        requestLogger.error('Pipeline sync request failed', {
+          error: summarizeError(err),
+          request: summarizePipelineBody(req.body),
+          durationMs: Date.now() - startedAt
+        });
         const payload = {
           error: err.message,
           step: stepId

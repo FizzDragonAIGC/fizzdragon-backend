@@ -5,6 +5,14 @@ import { normalizePipelineStepOutput } from '../services/output-normalizer.js';
 import { buildDeterministicBreakdownCsv, shouldUseDeterministicBreakdownFallback } from '../services/deterministic-breakdown.js';
 import { buildDeterministicCharacterCostume, shouldPreferDeterministicCharacterCostume } from '../services/deterministic-character-costume.js';
 import { ensureNovelTextFromAttachment } from '../services/attachment-to-text.js';
+import {
+  attachResponseLogging,
+  createRequestLogger,
+  summarizeError,
+  summarizeNormalization,
+  summarizePipelineBody,
+  summarizeTokens
+} from '../utils/logger.js';
 
 const PIPELINE_THINKING_HINTS = {
   'extract-bible': '正在抽取世界观、角色关系与核心规则。',
@@ -74,7 +82,7 @@ class ThinkingStreamDetector {
   }
 }
 
-function injectProjectContext(reqBody, ctx, stepId) {
+function injectProjectContext(reqBody, ctx, logger) {
   const disabledContextKeys = new Set(Array.isArray(reqBody?.disableContextKeys) ? reqBody.disableContextKeys : []);
   const injectedKeys = [];
 
@@ -86,21 +94,32 @@ function injectProjectContext(reqBody, ctx, stepId) {
     }
   }
 
-  console.log(`[Pipeline:${stepId}/stream] Injected context keys: ${injectedKeys.join(',')}`);
+  logger.info('Injected project context', {
+    injectedKeys,
+    disabledContextKeys: Array.from(disabledContextKeys)
+  });
 }
 
 export function registerStreamRoutes(router, deps) {
 
   for (const stepId of PIPELINE_STEPS) {
     router.post(`/${stepId}/stream`, async (req, res) => {
-      console.log(`[Pipeline:${stepId}/stream] Request received, body keys: ${Object.keys(req.body).join(',')}`);
+      const requestLogger = createRequestLogger(req, res, {
+        route: 'pipeline.stream',
+        stepId
+      });
+      const startedAt = attachResponseLogging(req, res, requestLogger);
+
+      requestLogger.info('Pipeline stream request received', {
+        request: summarizePipelineBody(req.body)
+      });
 
       // Auto-inject project context when projectId is provided
       if (req.body.projectId) {
         const userId = '_public';
         const ctx = readProjectContext(userId, req.body.projectId);
         if (ctx) {
-          injectProjectContext(req.body, ctx, stepId);
+          injectProjectContext(req.body, ctx, requestLogger);
         }
       }
       // SSE headers
@@ -120,6 +139,10 @@ export function registerStreamRoutes(router, deps) {
 
       const writeDeterministicCharacterCostume = (reason) => {
         const deterministicAssets = buildDeterministicCharacterCostume(req.body);
+        requestLogger.warn('Used deterministic character costume stream fallback', {
+          reason,
+          durationMs: Date.now() - startedAt
+        });
         write({
           type: 'thinking',
           content: reason || '角色设计改为本地确定性生成，避免流式返回无效内容。'
@@ -141,23 +164,30 @@ export function registerStreamRoutes(router, deps) {
         }
 
         if ((stepId === 'extract-bible' || stepId === 'breakdown') && !String(req.body?.novelText || '').trim()) {
-          await ensureNovelTextFromAttachment(req.body);
+          await ensureNovelTextFromAttachment(req.body, {
+            logger: requestLogger.child({ phase: 'attachment' })
+          });
         }
 
         if (stepId === 'design-characters' && shouldPreferDeterministicCharacterCostume(req.body)) {
           // DashScope long-form character-costume streaming is known to emit invalid zero chunks here.
           writeDeterministicCharacterCostume('角色设计改为本地确定性生成，避免长文本流式返回无效内容。');
-          console.warn(`[Pipeline:${stepId}/stream] Deterministic path used for long DashScope character costume generation`);
           if (!res.writableEnded) res.end();
           return;
         }
 
         const { systemPrompt, userMessage, agentId } = buildPipelinePrompt(stepId, req.body, deps);
-        console.log(`[Pipeline:${stepId}/stream] Calling ${agentId}, prompt length: ${systemPrompt.length + userMessage.length}`);
+        requestLogger.info('Dispatching pipeline stream call', {
+          agentId,
+          systemPromptLength: systemPrompt.length,
+          userMessageLength: userMessage.length
+        });
 
         // Determine provider
         const currentProvider = req.body.provider || process.env.AI_PROVIDER || 'dashscope';
         const PROVIDERS = deps._PROVIDERS || null;
+        let thinkingStarted = false;
+        let contentStarted = false;
 
         if (currentProvider === 'anthropic' && deps.anthropic) {
           // Anthropic SDK streaming
@@ -168,16 +198,34 @@ export function registerStreamRoutes(router, deps) {
             messages: [{ role: 'user', content: userMessage }],
             stream: true
           };
+          requestLogger.info('Starting anthropic streaming request', {
+            provider: currentProvider,
+            model: createParams.model
+          });
           const stream = deps.anthropic.messages.stream(createParams);
           let fullText = '';
           let fullThinking = '';
 
           stream.on('thinking', (thinking) => {
             fullThinking += thinking;
+            if (!thinkingStarted) {
+              thinkingStarted = true;
+              requestLogger.info('Thinking stream started', {
+                firstChunkLength: thinking.length,
+                provider: currentProvider
+              });
+            }
             write({ type: 'thinking', content: thinking });
           });
           stream.on('text', (text) => {
             fullText += text;
+             if (!contentStarted) {
+              contentStarted = true;
+              requestLogger.info('Content stream started', {
+                firstChunkLength: text.length,
+                provider: currentProvider
+              });
+            }
             write({ type: 'chunk', content: text });
           });
 
@@ -190,15 +238,28 @@ export function registerStreamRoutes(router, deps) {
           if (normalized.error) {
             if (stepId === 'design-characters') {
               writeDeterministicCharacterCostume('角色设计模型结果解析失败，已自动切换为本地确定性生成。');
-              console.warn(`[Pipeline:${stepId}/stream] Deterministic fallback used after normalization error: ${normalized.error}`);
               if (!res.writableEnded) res.end();
               return;
             }
+            requestLogger.warn('Anthropic stream normalization failed', {
+              provider: currentProvider,
+              model: createParams.model,
+              tokens: summarizeTokens(tokens),
+              normalization: summarizeNormalization(normalized),
+              durationMs: Date.now() - startedAt
+            });
             write({ type: 'error', error: normalized.error, details: normalized.details, raw: normalized.raw });
             if (!res.writableEnded) res.end();
             return;
           }
           fullText = normalized.result;
+          requestLogger.info('Anthropic stream completed', {
+            provider: currentProvider,
+            model: createParams.model,
+            tokens: summarizeTokens(tokens),
+            normalization: summarizeNormalization(normalized),
+            durationMs: Date.now() - startedAt
+          });
           write({ type: 'done', fullText, fullThinking: fullThinking || null, tokens });
 
           // Write back generated screenplay to project-context for cross-episode continuity
@@ -206,8 +267,18 @@ export function registerStreamRoutes(router, deps) {
             const epIdx = req.body.episodeIndex;
             writeProjectContext('_public', req.body.projectId, {
               screenplays: { [epIdx]: fullText }
-            }).catch(err => console.error(`[Pipeline:screenplay/stream] Context writeback failed:`, err.message));
-            console.log(`[Pipeline:screenplay/stream] Wrote back screenplay for episode ${epIdx}`);
+            })
+              .then(() => {
+                requestLogger.info('Screenplay written back to project context', {
+                  episodeIndex: epIdx
+                });
+              })
+              .catch((err) => {
+                requestLogger.error('Screenplay context writeback failed', {
+                  episodeIndex: epIdx,
+                  error: summarizeError(err)
+                });
+              });
           }
         } else {
           // OpenAI-compatible (DeepSeek etc.) - direct streaming
@@ -219,10 +290,20 @@ export function registerStreamRoutes(router, deps) {
           const modelTier = longOutputAgents.includes(agentId) ? 'best' : 'standard';
           const model = PROVIDERS?.[currentProvider]?.models?.[modelTier] || PROVIDERS?.[currentProvider]?.models?.standard || 'qwen-max';
 
-          console.log(`[Pipeline:${stepId}/stream] Calling ${currentProvider} (${model}), baseUrl=${baseUrl}, hasKey=${!!apiKey}`);
+          requestLogger.info('Starting compatible streaming request', {
+            provider: currentProvider,
+            model,
+            modelTier,
+            baseUrl,
+            hasApiKey: Boolean(apiKey)
+          });
 
           const fetchUrl = `${baseUrl}/chat/completions`;
-          console.log(`[Pipeline:${stepId}/stream] Fetching: ${fetchUrl}`);
+          requestLogger.info('Calling provider stream endpoint', {
+            provider: currentProvider,
+            model,
+            fetchUrl
+          });
           const ac = new AbortController();
           const fetchTimer = setTimeout(() => ac.abort(), 600000); // 10 min — align with frontend timeout
           const apiResp = await fetch(fetchUrl, {
@@ -243,7 +324,11 @@ export function registerStreamRoutes(router, deps) {
             signal: ac.signal
           });
           clearTimeout(fetchTimer);
-          console.log(`[Pipeline:${stepId}/stream] Fetch returned status: ${apiResp.status}`);
+          requestLogger.info('Provider stream endpoint responded', {
+            provider: currentProvider,
+            model,
+            statusCode: apiResp.status
+          });
 
           if (!apiResp.ok) {
             const errText = await apiResp.text().catch(() => '');
@@ -274,15 +359,39 @@ export function registerStreamRoutes(router, deps) {
 
                 if (delta?.reasoning_content) {
                   fullThinking += delta.reasoning_content;
+                  if (!thinkingStarted) {
+                    thinkingStarted = true;
+                    requestLogger.info('Thinking stream started', {
+                      provider: currentProvider,
+                      model,
+                      firstChunkLength: delta.reasoning_content.length
+                    });
+                  }
                   write({ type: 'thinking', content: delta.reasoning_content });
                 } else if (delta?.content) {
                   const events = detector.feed(delta.content);
                   for (const event of events) {
                     if (event.type === 'thinking') {
                       fullThinking += event.text;
+                      if (!thinkingStarted) {
+                        thinkingStarted = true;
+                        requestLogger.info('Thinking stream started', {
+                          provider: currentProvider,
+                          model,
+                          firstChunkLength: event.text.length
+                        });
+                      }
                       write({ type: 'thinking', content: event.text });
                     } else {
                       fullText += event.text;
+                      if (!contentStarted) {
+                        contentStarted = true;
+                        requestLogger.info('Content stream started', {
+                          provider: currentProvider,
+                          model,
+                          firstChunkLength: event.text.length
+                        });
+                      }
                       write({ type: 'chunk', content: event.text });
                     }
                   }
@@ -310,15 +419,28 @@ export function registerStreamRoutes(router, deps) {
           if (normalized.error) {
             if (stepId === 'design-characters') {
               writeDeterministicCharacterCostume('角色设计模型结果解析失败，已自动切换为本地确定性生成。');
-              console.warn(`[Pipeline:${stepId}/stream] Deterministic fallback used after normalization error: ${normalized.error}`);
               if (!res.writableEnded) res.end();
               return;
             }
+            requestLogger.warn('Compatible stream normalization failed', {
+              provider: currentProvider,
+              model,
+              tokens: summarizeTokens({ input: inputTokens, output: outputTokens }),
+              normalization: summarizeNormalization(normalized),
+              durationMs: Date.now() - startedAt
+            });
             write({ type: 'error', error: normalized.error, details: normalized.details, raw: normalized.raw });
             if (!res.writableEnded) res.end();
             return;
           }
           fullText = normalized.result;
+          requestLogger.info('Compatible stream completed', {
+            provider: currentProvider,
+            model,
+            tokens: summarizeTokens({ input: inputTokens, output: outputTokens }),
+            normalization: summarizeNormalization(normalized),
+            durationMs: Date.now() - startedAt
+          });
           write({ type: 'done', fullText, fullThinking: fullThinking || null, tokens: { input: inputTokens, output: outputTokens } });
 
           // Write back generated screenplay to project-context for cross-episode continuity
@@ -326,8 +448,18 @@ export function registerStreamRoutes(router, deps) {
             const epIdx = req.body.episodeIndex;
             writeProjectContext('_public', req.body.projectId, {
               screenplays: { [epIdx]: fullText }
-            }).catch(err => console.error(`[Pipeline:screenplay/stream] Context writeback failed:`, err.message));
-            console.log(`[Pipeline:screenplay/stream] Wrote back screenplay for episode ${epIdx}`);
+            })
+              .then(() => {
+                requestLogger.info('Screenplay written back to project context', {
+                  episodeIndex: epIdx
+                });
+              })
+              .catch((err) => {
+                requestLogger.error('Screenplay context writeback failed', {
+                  episodeIndex: epIdx,
+                  error: summarizeError(err)
+                });
+              });
           }
         }
       } catch (err) {
@@ -342,15 +474,25 @@ export function registerStreamRoutes(router, deps) {
               agent: 'deterministic_breakdown_fallback',
               provider: 'deterministic-local'
             });
-            console.warn(`[Pipeline:${stepId}/stream] Deterministic fallback used: ${err.message}`);
+            requestLogger.warn('Used deterministic breakdown stream fallback', {
+              error: summarizeError(err),
+              durationMs: Date.now() - startedAt
+            });
             if (!res.writableEnded) res.end();
             return;
           } catch (fallbackErr) {
-            console.error(`[Pipeline:${stepId}/stream] Deterministic fallback failed:`, fallbackErr.message);
+            requestLogger.error('Deterministic breakdown stream fallback failed', {
+              error: summarizeError(fallbackErr),
+              durationMs: Date.now() - startedAt
+            });
           }
         }
 
-        console.error(`[Pipeline:${stepId}/stream] Error:`, err.message);
+        requestLogger.error('Pipeline stream request failed', {
+          error: summarizeError(err),
+          request: summarizePipelineBody(req.body),
+          durationMs: Date.now() - startedAt
+        });
         write({ type: 'error', error: err.message });
       }
 
