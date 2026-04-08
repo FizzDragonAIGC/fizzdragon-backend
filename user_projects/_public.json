@@ -1,0 +1,654 @@
+{
+  "avatar-test": {
+    "data": {
+      "assetLibrary": {
+        "character_library": [
+          {
+            "character_id": "CH001",
+            "name": "杰克·舒利",
+            "pronouns": "he/him",
+            "role": "主角",
+            "base_look": "22岁白人男性，短发，轮椅，伤疤累累",
+            "image_prompt_portrait": "Young Caucasian male marine, 22, short cropped hair, battle scars, sitting in wheelchair, determined eyes, military dog tags",
+            "image_prompt_turnaround": "Full body turnaround of young male marine in wheelchair, muscular upper body, atrophied legs, worn military surplus clothing"
+          },
+          {
+            "character_id": "CH002",
+            "name": "涅提妮",
+            "pronouns": "she/her",
+            "role": "女主角",
+            "base_look": "蓝色皮肤纳美人女性，18岁，3米高，金色眼睛",
+            "image_prompt_portrait": "Blue-skinned Navi female, 18, tall athletic build, golden cat-like eyes, long braided dark hair with beads, tribal face paint, bone necklace",
+            "image_prompt_turnaround": "Full body turnaround Navi female, 10ft tall, blue skin, long tail, pointed ears, tribal loincloth and chest wrap, barefoot"
+          },
+          {
+            "character_id": "CH003",
+            "name": "格蕾丝",
+            "pronouns": "she/her",
+            "role": "配角",
+            "base_look": "50岁女科学家，聪慧眼神",
+            "image_prompt_portrait": "Middle-aged woman scientist, 50, sharp intelligent eyes, practical short hair, lab coat, cigarette in hand"
+          },
+          {
+            "character_id": "CH004",
+            "name": "夸里奇上校",
+            "pronouns": "he/him",
+            "role": "反派",
+            "base_look": "45岁军人，脸上三道平行伤疤",
+            "image_prompt_portrait": "Military colonel, 45, three parallel scars across face, muscular, cold steel-grey eyes, crew cut, imposing posture"
+          }
+        ],
+        "costume_library": [
+          {
+            "costume_id": "CST001",
+            "name": "杰克_轮椅便装",
+            "category": "日常",
+            "components": "top:褪色军用T恤,bottom:宽松军裤,shoes:无(轮椅),accessories:狗牌项链",
+            "materials_texture": "棉质旧军用面料",
+            "condition_states": [
+              "clean",
+              "worn"
+            ],
+            "prompt_fullbody": "Faded olive military t-shirt, loose surplus pants, dog tags, seated in basic wheelchair, worn fabric texture",
+            "prompt_portrait": "Close up young marine in faded military tee, dog tags visible, wheelchair armrest in frame",
+            "continuity_notes": "轮椅型号全片一致"
+          },
+          {
+            "costume_id": "CST002",
+            "name": "杰克_阿凡达体",
+            "category": "外星",
+            "components": "top:无,bottom:纳美部落腰布,shoes:赤脚,accessories:部落臂环",
+            "materials_texture": "编织植物纤维+骨饰",
+            "condition_states": [
+              "clean",
+              "dirty",
+              "battle-worn"
+            ],
+            "prompt_fullbody": "Blue-skinned 10ft Navi male body, tribal loincloth woven from plant fiber, bone arm bands, bare feet, long braided queue",
+            "prompt_portrait": "Close up blue Navi male face, golden eyes, tribal markings, braided queue over shoulder",
+            "continuity_notes": "尾巴辫子长度一致"
+          },
+          {
+            "costume_id": "CST003",
+            "name": "涅提妮_部落装",
+            "category": "部落",
+            "components": "top:编织胸衣,bottom:腰布,shoes:赤脚,accessories:骨项链+羽毛发饰",
+            "materials_texture": "植物纤维+兽骨+羽毛",
+            "condition_states": [
+              "clean",
+              "forest-stained"
+            ],
+            "prompt_fullbody": "Navi female tribal outfit, woven chest wrap, plant fiber loincloth, bone necklace, feather hair ornaments, barefoot",
+            "prompt_portrait": "Navi female portrait, bone necklace, feathers in braided hair, golden eyes, tribal face paint",
+            "continuity_notes": "项链全片不变"
+          }
+        ],
+        "character_costume_library": [
+          {
+            "character_id": "CH001",
+            "costume_id": "CST001",
+            "is_default": true,
+            "usage_tags": [
+              "地球",
+              "军事基地",
+              "日常"
+            ],
+            "fit_notes": "轮椅状态",
+            "props_bundle": [
+              "轮椅",
+              "狗牌"
+            ]
+          },
+          {
+            "character_id": "CH001",
+            "costume_id": "CST002",
+            "is_default": false,
+            "usage_tags": [
+              "潘多拉",
+              "雨林",
+              "部落"
+            ],
+            "fit_notes": "阿凡达身体",
+            "props_bundle": [
+              "弓箭",
+              "匕首"
+            ]
+          },
+          {
+            "character_id": "CH002",
+            "costume_id": "CST003",
+            "is_default": true,
+            "usage_tags": [
+              "雨林",
+              "部落",
+              "日常"
+            ],
+            "fit_notes": "默认部落装",
+            "props_bundle": [
+              "弓",
+              "箭筒"
+            ]
+          }
+        ],
+        "character_costume_episode_scene_library": [
+          {
+            "episode_id": "E001",
+            "scene_id": "E001_S01",
+            "slugline": "EXT.城市街道-夜",
+            "character_id": "CH001",
+            "costume_id": "CST001",
+            "continuity_delta": "clean",
+            "must_match": true,
+            "notes": "开场"
+          },
+          {
+            "episode_id": "E001",
+            "scene_id": "E001_S02",
+            "slugline": "INT.酒吧-夜",
+            "character_id": "CH001",
+            "costume_id": "CST001",
+            "continuity_delta": "同上+额外伤痕血迹",
+            "must_match": true,
+            "notes": "打架后"
+          },
+          {
+            "episode_id": "E001",
+            "scene_id": "E001_S05",
+            "slugline": "EXT.潘多拉雨林-日",
+            "character_id": "CH001",
+            "costume_id": "CST002",
+            "continuity_delta": "clean",
+            "must_match": true,
+            "notes": "首次阿凡达"
+          },
+          {
+            "episode_id": "E001",
+            "scene_id": "E001_S05",
+            "slugline": "EXT.潘多拉雨林-日",
+            "character_id": "CH002",
+            "costume_id": "CST003",
+            "continuity_delta": "clean",
+            "must_match": true,
+            "notes": "首次出场"
+          }
+        ]
+      }
+    }
+  },
+  "avatar_test_001": {
+    "data": {
+      "context": {
+        "storyBible": {
+          "meta": {
+            "title": "阿凡达",
+            "genre": "科幻/动作/冒险",
+            "era": "2154年",
+            "setting": "潘多拉星球",
+            "tone": "史诗感、环保主题"
+          },
+          "characters": [
+            {
+              "name": "Jake Sully",
+              "aliases": [
+                "杰克"
+              ],
+              "pronouns": "he/him",
+              "role": "protagonist",
+              "arc": "从残废老兵到纳美族英雄",
+              "look": "人类形态：坐轮椅的前海军陆战队员；阿凡达形态：蓝色皮肤、猫耳、3米高",
+              "personality": "勇敢、适应力强"
+            },
+            {
+              "name": "Neytiri",
+              "aliases": [
+                "奈蒂莉"
+              ],
+              "pronouns": "she/her",
+              "role": "deuteragonist",
+              "arc": "从怀疑外来者到接受杰克",
+              "look": "纳美族女战士，蓝色皮肤，辫发，身手矫健",
+              "personality": "骄傲、勇敢、善良"
+            },
+            {
+              "name": "Colonel Quaritch",
+              "aliases": [
+                "夸奇上校"
+              ],
+              "pronouns": "he/him",
+              "role": "antagonist",
+              "arc": "军事独裁者，一心摧毁纳美族",
+              "look": "壮硕白人军官，面部有伤疤",
+              "personality": "冷酷、无情"
+            },
+            {
+              "name": "Grace Augustine",
+              "aliases": [
+                "格蕾丝"
+              ],
+              "pronouns": "she/her",
+              "role": "mentor",
+              "arc": "科学家，阿凡达项目负责人",
+              "look": "中年女科学家",
+              "personality": "严肃、专业、关爱纳美族"
+            }
+          ]
+        },
+        "projectConfig": {
+          "totalEpisodes": 5,
+          "episodeDuration": 90,
+          "shotsPerMin": 10
+        },
+        "screenplays": {
+          "0": "=== E001: 第1集 ===\n0:00-0:15\n[Visual] 太空船穿越星际，潘多拉星球从远处逐渐放大\n[Visual] 冷冻舱内，Jake Sully的轮椅旁，一个蓝色阿凡达身体漂浮在培养液中\n[SFX/Ambience] 低沉的引擎嗡嗡声渐弱，替代以心跳般的节奏\nVO: Six years in cryo. They said I was dreaming. But the dream was about to become real.\n\n0:15-0:45\n[Visual] Jake被推出冷冻舱，阳光刺眼。他眯着眼看向窗外——潘多拉的丛林一望无际\n[Visual] 其他士兵走过，投来不屑的目光。Jake的轮椅在走廊上艰难前行\n[SFX/Ambience] 军靴声、金属地板回响\nQuaritch: You are not in Kansas anymore. You are on Pandora.\n\n0:45-1:05\n[Visual] Grace Augustine 实验室。全息屏幕上显示纳美族DNA链与人类DNA的对比\n[Visual] Grace不耐烦地看着Jake——又一个军方派来的\nGrace: So you just figured you would come here, to the most hostile environment known to man, with no training of any kind?\nJake: Seems like the kind of place I would fit right in.",
+          "1": "=== E002: 第2集 ===\n0:00-0:15\n[Visual] Jake首次连接阿凡达。意识传输的蓝光隧道\n[Visual] 阿凡达的眼睛猛然睁开——金色虹膜\n[SFX/Ambience] 心电图加速的嘀嘀声\n\n0:15-0:45\n[Visual] Jake在阿凡达身体中站起来——六年来第一次感受双腿\n[Visual] 他在草地上奔跑，赤脚踩在泥土上，笑得像个孩子\n[SFX/Ambience] 风声、脚步声、Jake的喘息和笑声\nJake: I can walk! I can run!\n\n0:45-1:05\n[Visual] 潘多拉丛林夜景。生物荧光植物亮起蓝紫色的光\n[Visual] Jake被一头Thanator追赶，跳下悬崖坠入河中\n[SFX/Ambience] 巨兽咆哮、水花声\nNeytiri: (弓箭瞄准) You should not be here."
+        }
+      },
+      "assetLibrary": {
+        "character_library": [
+          {
+            "name": "Jake Sully",
+            "gender": "男",
+            "age": "28",
+            "appearance": "人类：轮椅，寸头；阿凡达：蓝色皮肤3米高",
+            "personality": "勇敢坚韧"
+          },
+          {
+            "name": "Neytiri",
+            "gender": "女",
+            "age": "约20",
+            "appearance": "蓝色皮肤，长辫，身材修长矫健",
+            "personality": "骄傲勇敢"
+          },
+          {
+            "name": "Colonel Quaritch",
+            "gender": "男",
+            "age": "45",
+            "appearance": "壮硕军官，面部伤疤",
+            "personality": "冷酷无情"
+          },
+          {
+            "name": "Grace Augustine",
+            "gender": "女",
+            "age": "50",
+            "appearance": "中年女科学家，红发",
+            "personality": "严肃专业"
+          }
+        ],
+        "costume_library": [
+          {
+            "character": "Jake Sully",
+            "name": "海军陆战队制服",
+            "description": "迷彩军装，轮椅"
+          },
+          {
+            "character": "Jake Sully",
+            "name": "阿凡达战甲",
+            "description": "纳美族部落装饰，胸甲，弓箭"
+          },
+          {
+            "character": "Neytiri",
+            "name": "猎人装束",
+            "description": "纳美族女猎人服饰，兽骨项链，羽毛头饰"
+          },
+          {
+            "character": "Colonel Quaritch",
+            "name": "AMP机甲",
+            "description": "重型机甲战斗服"
+          },
+          {
+            "character": "Grace Augustine",
+            "name": "实验室白大褂",
+            "description": "科研人员标准装束"
+          }
+        ],
+        "scene_library": [
+          {
+            "name": "潘多拉丛林",
+            "description": "生物荧光植物密布的外星丛林"
+          },
+          {
+            "name": "家园树",
+            "description": "纳美族聚居地，巨大的螺旋树"
+          },
+          {
+            "name": "地狱之门基地",
+            "description": "人类军事前哨基地"
+          },
+          {
+            "name": "灵魂树",
+            "description": "发光的柳树，纳美族圣地"
+          }
+        ],
+        "prop_library": [
+          {
+            "name": "阿凡达连接舱",
+            "description": "人类与阿凡达意识连接的高科技设备"
+          },
+          {
+            "name": "纳美弓箭",
+            "description": "巨大的纳美族传统弓箭"
+          },
+          {
+            "name": "AMP机甲",
+            "description": "人类军用双足步行机甲"
+          }
+        ]
+      }
+    }
+  },
+  "avatar_full_test": {
+    "data": {
+      "context": {
+        "storyBible": {
+          "meta": {
+            "title": "阿凡达",
+            "genre": "科幻冒险",
+            "tone": "紧张、史诗、情感丰富",
+            "era": "未来太空殖民",
+            "setting": "潘多拉星球，一个充满神秘生物和原始自然的外星世界",
+            "worldRules": [
+              "人类通过阿凡达与纳美人建立联系",
+              "UNOBTANIUM 是一种稀有且高价值的矿物",
+              "纳美人与自然和谐共存"
+            ],
+            "targetAudience": "青少年及成人"
+          },
+          "characters": [
+            {
+              "name": "杰克·舒利",
+              "aliases": [],
+              "pronouns": "他/他的",
+              "age": "22",
+              "look": "伤痕累累的老兵，轮椅使用者，肩上有‘天生失败者’纹身",
+              "personality": "坚韧、愤怒、渴望证明自己",
+              "role": "主角，阿凡达驾驶员",
+              "arc": "从绝望到找到人生目标",
+              "keyRelationships": {
+                "涅提妮": "最初敌对，后发展为亲密关系",
+                "夸里奇上校": "对立的军事指挥官",
+                "格蕾丝": "科学指导者"
+              }
+            },
+            {
+              "name": "涅提妮",
+              "aliases": [],
+              "pronouns": "她/她的",
+              "age": "18",
+              "look": "蓝色皮肤，长尾巴，优雅而强大",
+              "personality": "警惕、坚强、对自然充满敬畏",
+              "role": "女主角，纳美人战士",
+              "arc": "从怀疑到信任杰克",
+              "keyRelationships": {
+                "杰克·舒利": "从敌对到爱慕",
+                "莫阿特": "母亲，精神领袖"
+              }
+            },
+            {
+              "name": "夸里奇上校",
+              "aliases": [],
+              "pronouns": "他/他的",
+              "age": "未知",
+              "look": "英俊，面部有伤疤，穿着军装",
+              "personality": "冷酷、专制、对纳美人充满敌意",
+              "role": "反派，殖民地保安部长",
+              "arc": "始终对抗纳美人和杰克",
+              "keyRelationships": {
+                "杰克·舒利": "敌对关系",
+                "塞尔弗里奇": "同伙"
+              }
+            }
+          ],
+          "userDirectives": {
+            "characterNotes": "杰克·舒利是主角，涅提妮是女主角，夸里奇上校是反派",
+            "globalInstructions": "保持科幻冒险基调，突出人与自然主题",
+            "stylePreferences": "现实主义风格，注重角色心理描写和环境细节"
+          }
+        },
+        "projectConfig": {
+          "totalEpisodes": 5,
+          "episodeDuration": 90
+        },
+        "breakdownHeaders": [
+          "ep_id",
+          "source_range",
+          "one_line_plot",
+          "setup",
+          "development",
+          "turn",
+          "hook",
+          "scene_list",
+          "characters",
+          "must_keep",
+          "no_add"
+        ],
+        "breakdownRows": [
+          [
+            "E001",
+            "11-191",
+            "杰克·舒利在弗吉尼亚州医院回忆过去的飞行梦，随后在城市中艰难生活。",
+            "杰克躺在医院里回忆飞行的梦。",
+            "杰克在城市中艰难生活，面对身体残疾和社会压力。",
+            "杰克在酒吧中与一个欺负者发生冲突。",
+            "杰克被保安扔出酒吧，躺在垃圾堆上。",
+            "INT. 弗吉尼亚州医院 - DAY; INT. 城市街道 - NIGHT; INT. 杰克的家 - NIGHT; INT. 喧闹的酒吧 - NIGHT; EXT. 酒吧后面的垃圾巷 - NIGHT",
+            "杰克·舒利",
+            "杰克的身体残疾和心理状态",
+            "无"
+          ],
+          [
+            "E002",
+            "192-473",
+            "杰克得知哥哥汤米去世的消息，并被招募前往潘多拉星球。",
+            "杰克在火葬场得知哥哥汤米的死讯。",
+            "两个特工找到杰克，告诉他关于去潘多拉完成哥哥未完成的任务。",
+            "杰克决定接受任务前往潘多拉。",
+            "INT. 市政火葬场 - NIGHT; INT. 低温间 - NIGHT; INT. 宇宙飞船 - SPACE; EXT. 潘多拉轨道 - DAY",
+            "杰克·舒利、特工1、特工2",
+            "杰克的背景和动机",
+            "无"
+          ],
+          [
+            "E003",
+            "474-751",
+            "杰克抵达潘多拉星球，开始适应新的环境。",
+            "杰克和其他新来的人到达潘多拉星球。",
+            "杰克在军事行动中心听取夸里奇上校的简报。",
+            "杰克见到格蕾丝博士并准备开始阿凡达训练。",
+            "EXT. 暮色中的雨林 - DAY; EXT. 暮色中的“地狱之门” - DAY; INT. 物资供应所 - NIGHT; INT. 连接房 - EVENING",
+            "杰克·舒利、夸里奇上校、格蕾丝博士",
+            "潘多拉星球的环境和规则",
+            "无"
+          ],
+          [
+            "E004",
+            "752-941",
+            "杰克第一次连接到阿凡达，体验到了自由行走的感觉。",
+            "杰克进入连接单元，准备连接到阿凡达。",
+            "杰克成功连接到阿凡达，并开始感受新的身体。",
+            "杰克在阿凡达居住区自由奔跑。",
+            "INT. 生物实验室 - DAY; INT. 连接房 - DAY; EXT. 阿凡达居住区 - DAY",
+            "杰克·舒利、格蕾丝博士、诺曼",
+            "阿凡达的连接过程和体验",
+            "无"
+          ],
+          [
+            "E005",
+            "942-1268",
+            "杰克跟随格蕾丝和诺曼进行第一次野外考察，遭遇危险。",
+            "杰克、格蕾丝和诺曼乘坐萨姆森运输机前往雨林。",
+            "他们在雨林中采集样本，杰克遇到锤头雷兽。",
+            "杰克遭遇闪雷兽，涅提妮救了他。",
+            "EXT. 雨林上空 - DAY; EXT. 雨林 - DAY; EXT. 瀑布下的河流 - DAY",
+            "杰克·舒利、格蕾丝博士、诺曼、涅提妮",
+            "野外考察的过程和危险",
+            "无"
+          ]
+        ],
+        "screenplays": {
+          "0": "0:00-0:15\n[Visual] 弗吉尼亚州医院的病房内，杰克·舒利躺在病床上，窗外阳光透过窗帘洒在地板上。\n[Visual] 杰克的眼神空洞，望着天花板，似乎陷入了深深的回忆。\n[SFX/Ambience] 病房内传来轻微的心跳监测声和呼吸机的声音。\n杰克·舒利\n（喃喃自语）\n我曾经梦想飞翔，但现在只能被困在这里。\n\n0:15-0:45\n[Visual] 城市街道的夜景，灯光昏暗，人影稀疏。\n[Visual] 杰克坐在轮椅上，艰难地穿过人群，路人的目光中带着同情和好奇。\n[SFX/Ambience] 街道上汽车的轰鸣声和行人的脚步声交织在一起。\n杰克·舒利\n（低声咒骂）\n该死的腿，为什么偏偏是我？\n\n[Visual] 杰克回到家中，狭小的房间内摆满了各种药品和医疗设备。\n[Visual] 他费力地从轮椅上挪到床上，脸上露出痛苦的表情。\n[SFX/Ambience] 门外传来邻居争吵的声音，屋内显得更加寂静。\n杰克·舒利\n（咬牙切齿）\n我不能这样过一辈子。\n\n0:45-1:05\n[Visual] 酒吧内嘈杂喧闹，人们喝酒聊天，音乐震耳欲聋。\n[Visual] 杰克坐在角落里，独自喝着酒，眼神中带着一丝愤怒。\n[SFX/Ambience] 酒吧内的音乐声和人们的笑声混杂在一起。\n杰克·舒利\n（对着酒杯）\n汤米，你为什么要丢下我？\n\n[Visual] 一个醉汉摇摇晃晃地走过来，挑衅地看着杰克。\n[Visual] 杰克抬起头，目光坚定，毫不退缩。\n[SFX/Ambience] 酒吧内的喧闹声暂时停了下来，气氛变得紧张。\n醉汉\n嘿，瘸子，这里不是你的地方。\n\n杰克·舒利\n（冷冷地）\n滚开。\n\n1:05-1:25\n[Visual] 醉汉被激怒了，一拳打向杰克，杰克勉强躲开。\n[Visual] 保安冲过来，将两人分开，场面一片混乱。\n[SFX/Ambience] 酒吧内的打斗声和人们的惊呼声此起彼伏。\n保安\n（大声喊叫）\n都给我住手！\n\n[Visual] 保安将杰克拖出酒吧，扔在后巷的垃圾堆上。\n[Visual] 杰克挣扎着坐起来，脸上满是挫败感。\n[SFX/Ambience] 后巷里的风吹过，带来一阵寒意。\n杰克·舒利\n（喘息）\n我真的无能为力了吗？\n\n1:25-1:40\n[Visual] 杰克抬头望向夜空，星星闪烁，仿佛在嘲笑他的无助。\n[Visual] 他握紧拳头，眼中闪过一丝坚定。\n[SFX/Ambience] 夜风呼啸，远处传来城市的喧嚣声。\n杰克·舒利\n（低语）\n不，我不会放弃。\n\n1:40-1:45\n[Visual] 杰克深吸一口气，重新调整姿势，准备站起来。\n[Visual] 画面逐渐拉远，杰克的身影在夜色中显得格外孤独。\n[SFX/Ambience] 背景音乐渐强，充满希望和决心。\n杰克·舒利\n（内心独白）\n无论前方有多少困难，我都要找到新的方向。",
+          "1": "0:00-0:15  \n[Visual] 市政火葬场灰白走廊尽头，一扇标着“低温间”的铁门微微渗出寒气。  \n[Visual] 杰克·舒利坐在轮椅上，双手紧攥扶手，指节发白，肩头那枚“天生失败者”纹身在冷光下泛着旧墨的暗红。  \n[SFX/Ambience] 低频嗡鸣声持续震动空气，混着远处金属门自动滑开的液压嘶声。  \n杰克·舒利  \n（喉结滚动）  \n……汤米？  \n\n0:15-0:45  \n[Visual] 低温间内，不锈钢台面反射惨白灯光；一具覆盖银箔裹尸布的躯体静静平躺，边缘凝着细霜。  \n[Visual] 特工1摘下手套，将一张全息平板推至杰克眼前——画面闪动：汤米穿着阿凡达操作服，在潘多拉雨林边缘抬手，笑容未落，信号中断。  \n[SFX/Ambience] 平板发出轻微电流滋滋声，裹尸布随气流微颤的窸窣。  \n特工1  \n我们不是来吊唁的。他是你哥哥，也是UNOBTANIUM勘探队首席基因协调员。  \n特工2  \n（递过一份电子协议）  \n他没签完的合同，现在归你了。  \n\n0:45-1:05  \n[Visual] 杰克低头盯着自己瘫痪的双腿，轮椅脚踏板映出他扭曲的倒影。  \n[Visual] 他忽然伸手扯开左袖——疤痕纵横的小臂上，“天生失败者”下方，一道新鲜划痕正渗出血珠。  \n[SFX/Ambience] 血珠滴落在金属踏板上的轻响，被低温间的静音系统放大成闷击。  \n杰克·舒利  \n（冷笑）  \n你们要我替死人走路？  \n\n1:05-1:25  \n[Visual] 特工2打开平板，调出潘多拉轨道影像：蓝绿色星球缓缓旋转，大气层边缘泛着虹彩光晕。  \n[Visual] 镜头切近——一艘银灰色飞船正脱离地球轨道，舷窗内闪过无数沉睡舱，其中一格标签闪烁：“J. SULLY - AVATAR PILOT”。  \n[SFX/Ambience] 深空通讯杂音刺入，夹杂一句遥远女声：“……阿凡达神经链接已校准。”  \n特工1  \n你哥哥的阿凡达还活着。而你——  \n（停顿半秒）  \n——是唯一能唤醒它的人。  \n\n1:25-1:40  \n[Visual] 杰克猛地抬头，目光穿透低温间玻璃窗，直刺窗外夜空——一颗流星正撕裂云层，坠向南方天际。  \n[Visual] 他右手缓缓抬起，五指张开，仿佛要抓住那道光；轮椅液压杆发出一声低沉叹息，缓缓升至站立高度。  \n[SFX/Ambience] 流星掠过时尖锐的电离啸叫，骤然被真空吞没，余下绝对寂静。  \n杰克·舒利  \n（声音沙哑，却不再颤抖）  \n带我去见我的身体。  \n\n1:40-1:45  \n[Visual] 轮椅自动转向，镜头俯拍：杰克的影子被走廊顶灯拉长，一路延伸至火葬场大门外——门外，一辆无标黑车引擎无声启动。  \n[Visual] 车窗降下，露出特工2侧脸；后视镜里，火葬场招牌“ETERNAL REST”正被车身阴影一寸寸吞没。  \n[SFX/Ambience] 车门关闭的真空吸合声，短促、冰冷、不可逆。  \n杰克·舒利  \n（VO，极轻）  \n这一次……我不再是替补。",
+          "2": "0:00-0:15  \n[Visual] EXT. 潘多拉星球大气层边缘 — DAY  \n银灰色登陆舱剧烈震颤，舷窗外气流撕裂成紫红色电离焰。  \n[Visual] 舱内监控屏闪烁红光：“REENTRY STABILIZED — LANDING ZONE DELTA-7”；杰克·舒利被安全带死死按在座椅上，瞳孔收缩，呼吸急促。  \n[SFX/Ambience] 金属呻吟声、高频热盾剥蚀嘶鸣、氧气循环泵的规律嗡鸣。  \n杰克·舒利  \n（咬牙，指节抵住轮椅扶手）  \n……不是梦。  \n\n0:15-0:45  \n[Visual] EXT. “地狱之门”基地外围 — DAY  \n焦黑 landing pad 上蒸腾热浪；远处雨林如活物般起伏，藤蔓在风中缓慢摆动，叶片泛着生物荧光。  \n[Visual] 杰克被机械臂缓缓抬出舱门，双脚悬空——他低头凝视自己瘫痪的双腿，再抬眼，望向雨林深处一双幽绿反光的眼睛（未见其形）。  \n[SFX/Ambience] 远处传来低频兽吼，混着风穿过巨型螺旋蕨的沙沙声；头盔通讯器滋滋作响。  \n夸里奇上校  \n（画外音，冷硬如钛合金）  \n欢迎来到潘多拉，舒利中士。这里没有怜悯，只有任务、矿物，和服从。  \n\n0:45-1:05  \n[Visual] INT. 军事行动中心简报室 — DAY  \n全息投影悬浮：UNOBTANIUM矿脉图在纳美人圣树根系上重叠闪烁；夸里奇站在光柱中央，军装笔挺，左颊伤疤随讲话微微牵动。  \n[Visual] 杰克坐在轮椅上，目光掠过投影，停在角落一张模糊影像——蓝色身影跃过瀑布，长尾划出银弧。  \n[SFX/Ambience] 全息风扇低鸣；投影仪散热口发出细微蜂鸣。  \n夸里奇上校  \n你哥哥的阿凡达还连着神经桥。但你？你只是个备用插头。  \n（停顿，直视杰克）  \n证明你能用它走路——否则，你连这扇门都走不出去。  \n\n1:05-1:25  \n[Visual] INT. 格蕾丝博士实验室 — EVENING  \n蓝光滤镜下，数十株发光植物在培养槽中脉动；格蕾丝背对门口，正用探针轻触一株夜光苔藓，指尖沾着微光孢子。  \n[Visual] 杰克被推入时，她转身——眼镜滑至鼻尖，眼神锐利如扫描仪，扫过他肩头纹身、轮椅液压杆、颤抖的右手。  \n[SFX/Ambience] 苔藓释放孢子的细微爆裂声；远处传来阿凡达舱冷却液循环的汩汩声。  \n格蕾丝博士  \n（摘下眼镜，擦镜片）  \n“天生失败者”？  \n（抬眼）  \n那纹身底下，还有心跳。那就够了。  \n\n1:25-1:40  \n[Visual] INT. 连接房 — NIGHT  \n环形舱阵列幽蓝呼吸；中央一台阿凡达舱缓缓开启，内部液体泛起涟漪，映出杰克倒影——与舱内那具蓝色躯体轮廓渐渐重合。  \n[Visual] 杰克被机械臂移入舱内，神经接口贴合后颈；他闭眼，睫毛剧烈颤动；监控屏上，脑波曲线骤然飙升，同步率跳至89%。  \n[SFX/Ambience] 液体灌注声、神经信号滴答声加速、舱盖闭合时真空锁扣的沉闷“咔嗒”。  \n格蕾丝博士  \n（轻声，近乎耳语）  \n别找你的腿……  \n（停顿）  \n……去找风。  \n\n1:40-1:45  \n[Visual] CLOSE ON JACK’S EYES — SNAP OPEN  \n瞳孔深处，映出一片摇曳的、巨大的、发着柔光的树叶——真实，非投影，非模拟。  \n[Visual] 镜头急速拉升：连接房穹顶之外，潘多拉夜空铺开亿万星辰；一颗流星正无声坠落，轨迹直指雨林深处圣树方向。  \n[SFX/Ambience] 第一声纳美语吟唱自远方升起，空灵、古老、不容置疑。  \n杰克·舒利  \n（VO，气息微颤，却笃定）  \n……我站起来了。"
+        }
+      },
+      "assetLibrary": {
+        "character_library": [
+          {
+            "character_id": "CS001",
+            "character_name": "杰克·舒利",
+            "aliases": [],
+            "pronouns": "他/他的",
+            "age": "22",
+            "look": "伤痕累累的老兵，轮椅使用者，肩上有‘天生失败者’纹身",
+            "personality": "坚韧、愤怒、渴望证明自己",
+            "role": "主角，阿凡达驾驶员",
+            "arc": "从绝望到找到人生目标"
+          }
+        ],
+        "costume_library": [
+          {
+            "costume_id": "CT001",
+            "costume_name": "医院病号服",
+            "description": "医院病床上的服装",
+            "category": "日常/病号服",
+            "tags": [
+              "现代",
+              "简单"
+            ]
+          },
+          {
+            "costume_id": "CT002",
+            "costume_name": "城市街头便服",
+            "description": "在城市街头穿着的日常便服",
+            "category": "日常/便服",
+            "tags": [
+              "现代",
+              "都市"
+            ]
+          },
+          {
+            "costume_id": "CT003",
+            "costume_name": "公寓居家服",
+            "description": "在公寓内穿着的居家裤子",
+            "category": "日常/居家服",
+            "tags": [
+              "休闲",
+              "居家"
+            ]
+          },
+          {
+            "costume_id": "CT004",
+            "costume_name": "酒吧休闲服",
+            "description": "在酒吧穿着的休闲服装",
+            "category": "日常/休闲服",
+            "tags": [
+              "休闲",
+              "社交"
+            ]
+          },
+          {
+            "costume_id": "CT005",
+            "costume_name": "小巷遇袭服",
+            "description": "在黑暗小巷中遇袭时穿着的服装，沾有血迹",
+            "category": "日常/便服",
+            "tags": [
+              "破损",
+              "血迹"
+            ]
+          },
+          {
+            "costume_id": "CT006",
+            "costume_name": "火葬场便服",
+            "description": "在火葬场穿着的便服",
+            "category": "日常/便服",
+            "tags": [
+              "肃穆",
+              "简单"
+            ]
+          }
+        ],
+        "character_costume_relationship": [
+          {
+            "character_id": "CS001",
+            "costume_id": "CT001",
+            "relationship_type": "穿着",
+            "notes": "在医院病床上"
+          },
+          {
+            "character_id": "CS001",
+            "costume_id": "CT002",
+            "relationship_type": "穿着",
+            "notes": "在城市街头"
+          },
+          {
+            "character_id": "CS001",
+            "costume_id": "CT003",
+            "relationship_type": "穿着",
+            "notes": "在公寓内"
+          },
+          {
+            "character_id": "CS001",
+            "costume_id": "CT004",
+            "relationship_type": "穿着",
+            "notes": "在酒吧内"
+          },
+          {
+            "character_id": "CS001",
+            "costume_id": "CT005",
+            "relationship_type": "穿着",
+            "notes": "在小巷遇袭时"
+          },
+          {
+            "character_id": "CS001",
+            "costume_id": "CT006",
+            "relationship_type": "穿着",
+            "notes": "在火葬场"
+          }
+        ],
+        "character_costume_episode_scene": [
+          {
+            "episode_id": "E001",
+            "scene_id": "1",
+            "character_id": "CS001",
+            "costume_id": "CT001",
+            "notes": "医院病房内"
+          },
+          {
+            "episode_id": "E001",
+            "scene_id": "2",
+            "character_id": "CS001",
+            "costume_id": "CT002",
+            "notes": "城市街头"
+          },
+          {
+            "episode_id": "E001",
+            "scene_id": "3",
+            "character_id": "CS001",
+            "costume_id": "CT003",
+            "notes": "公寓内"
+          },
+          {
+            "episode_id": "E001",
+            "scene_id": "4",
+            "character_id": "CS001",
+            "costume_id": "CT004",
+            "notes": "酒吧内"
+          },
+          {
+            "episode_id": "E001",
+            "scene_id": "5",
+            "character_id": "CS001",
+            "costume_id": "CT005",
+            "notes": "小巷内"
+          },
+          {
+            "episode_id": "E001",
+            "scene_id": "6",
+            "character_id": "CS001",
+            "costume_id": "CT006",
+            "notes": "火葬场内"
+          }
+        ]
+      }
+    }
+  }
+}

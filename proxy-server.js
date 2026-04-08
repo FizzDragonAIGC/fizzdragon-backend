@@ -4,14 +4,14 @@
 import 'dotenv/config';  // 加载.env文件
 import express from 'express';
 import cors from 'cors';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { execSync, spawn } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
+import { buildOpenApiSpec, buildSwaggerUiHtml } from './docs/openapi-spec.js';
+const ROOT_DIR = dirname(fileURLToPath(import.meta.url));
 
 // ========== 多Provider配置 ==========
 const PROVIDERS = {
@@ -53,16 +53,33 @@ const PROVIDERS = {
       best: 'anthropic/claude-3-opus'
     },
     pricing: { input: 0.014/1000000, output: 0.14/1000000 }
+  },
+  dashscope: {
+    name: 'Alibaba DashScope (Qwen)',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    models: {
+      fast: 'qwen-turbo',
+      standard: 'qwen3.5-plus',
+      best: 'qwen-max'
+    },
+    pricing: { input: 0.0005/1000, output: 0.002/1000 }
   }
 };
 
+// 统一的 API key 解析
+function getApiKeyForProvider(provider) {
+  if (provider === 'dashscope') return process.env.DASHSCOPE_API_KEY || process.env.ALIYUN_API_KEY;
+  if (provider === 'anthropic') return process.env.ANTHROPIC_API_KEY;
+  if (provider === 'gemini') return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  return process.env[`${provider.toUpperCase()}_API_KEY`];
+}
+
 // 当前使用的Provider (可通过API切换)
-let currentProvider = process.env.AI_PROVIDER || 'anthropic';
+let currentProvider = process.env.AI_PROVIDER || 'dashscope';
 import { AGENTS, AGENT_GROUPS, STATS } from './agents-config.js';
 
 // Skills目录路径
-// Skills目录 - 使用本地合并版_complete
-const SKILLS_DIR = '/home/beerbear/.openclaw/workspace/ai_drama_studio_v2/workbench/v3/server/skills';
+const SKILLS_DIR = join(ROOT_DIR, 'skills');
 
 // 加载skill文件内容的缓存
 const skillCache = new Map();
@@ -120,6 +137,8 @@ function loadSkill(skillId) {
     } catch (e) {
       console.error(`Failed to load skill ${skillId}:`, e.message);
     }
+  } else {
+    console.warn(`Skill file missing: ${skillPath}`);
   }
   return null;
 }
@@ -144,6 +163,7 @@ function needsJsonOutput(agentId) {
     'episode_mapping_pack', // 分集映射表CSV - 自然語言/CSV
     'story_breakdown_pack', // 劇情拆解包（80集映射）- CSV
     'storyboard_csv', // 分镜表CSV(单表) - CSV
+    'aggregate',     // 聚合分段結果 - CSV
     'script',        // 劇本
     'dialogue',      // 對話
     'acting',        // 演技指導
@@ -171,6 +191,7 @@ function needsJsonOutput(agentId) {
     'pose',          // 動作
     'expression',    // 表情
     'character_costume', // 人物_服装智能体 - 资产JSON
+    'asset_extractor_repair'
   ];
   
   if (naturalLanguageAgents.includes(agentId)) {
@@ -222,6 +243,72 @@ function safeJSONParse(jsonStr, agentId = 'unknown') {
   }
 }
 
+const CONTEXT_EDIT_ALLOWED_KEYS = new Set([
+  'storyBible',
+  'breakdownHeaders',
+  'breakdownRows',
+  'projectConfig',
+  'screenplays',
+  'assetLibrary'
+]);
+
+function extractJsonTextPayload(text) {
+  const cleaned = sanitizeForJson(String(text || '')).trim();
+  if (!cleaned) return '{}';
+
+  const fencedMatch = cleaned.match(/```json\s*([\s\S]*?)```/i) || cleaned.match(/```([\s\S]*?)```/);
+  if (fencedMatch?.[1]) {
+    return fencedMatch[1].trim();
+  }
+
+  const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+  return objectMatch ? objectMatch[0].trim() : cleaned;
+}
+
+function pickContextPatchKeys(patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return {};
+  return Object.fromEntries(
+    Object.entries(patch).filter(([key, value]) => CONTEXT_EDIT_ALLOWED_KEYS.has(key) && value !== undefined)
+  );
+}
+
+function buildContextEditPrompts(instruction, context) {
+  const systemPrompt = `你是短剧项目的“上下文修订器”。
+
+你的任务不是自由创作，而是基于当前项目 context 按用户要求做最小必要修改，并输出可直接写回项目的 JSON patch。
+
+必须遵守：
+1. 只修改用户明确要求的字段，不要无关重写。
+2. 输出必须是纯 JSON，不要 markdown，不要解释，不要代码块。
+3. JSON 结构必须严格为：
+{
+  "summary": "一句中文摘要，说明你改了什么",
+  "patch": {
+    "storyBible": {},
+    "breakdownHeaders": [],
+    "breakdownRows": [],
+    "projectConfig": {},
+    "screenplays": {},
+    "assetLibrary": {}
+  }
+}
+4. patch 里只能放需要更新的顶层字段；未修改的顶层字段不要输出。
+5. 如果修改 breakdownRows，必须保证和 breakdownHeaders 对应；除非用户要求改总集数，否则保持原有集数和顺序。
+6. 如果修改人物设定、世界观、关系、口吻等全局 canon，优先更新 storyBible，并同步修正明显受影响的 breakdownRows / screenplays。
+7. 如果用户只是在补充说明、纠正设定、强化某集 hook，禁止重写整部剧本。
+8. summary 必须简洁、可读、面向产品用户。`;
+
+  const userMessage = `当前项目 context JSON：
+${JSON.stringify(context, null, 2)}
+
+用户的修改要求：
+${instruction}
+
+请只输出纯 JSON。`;
+
+  return { systemPrompt, userMessage };
+}
+
 // ========== 角色数据后处理 - 确保必要字段存在 ==========
 function validateAndFixCharacters(data) {
   if (!data || !data.characters) return data;
@@ -261,6 +348,534 @@ function validateAndFixCharacters(data) {
   return data;
 }
 
+// ========== Pipeline 工具函数 ==========
+
+// 从小说文本构建 source_range 分段索引（用于 story_breakdown_pack）
+function buildSourceRanges(text, target = 80) {
+  let rawText = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  // PDF 提取的文本往往行数极少（整页连成一行），先按句号/场景标记重新分行
+  let lines = rawText.split('\n');
+  if (lines.length < target * 2) {
+    // 行数不足，按中文句号、场景标记、段落分隔符重新切分
+    rawText = rawText
+      .replace(/([。！？!?])\s*/g, '$1\n')           // 中文/英文句末
+      .replace(/(\.)\s+(?=[A-Z\u4e00-\u9fff])/g, '$1\n') // 英文句号后接大写/中文
+      .replace(/\s{2,}/g, '\n')                       // 多空格当段落分隔
+      .replace(/((?:INT|EXT|内景|外景|镜头切至)[.．：:].+)/g, '\n$1\n'); // 场景标记独立成行
+    lines = rawText.split('\n').filter(l => l.trim().length > 0);
+  }
+
+  // 章节头检测（支持更多格式）
+  const headRe = /^\s*(Chapter\s+\d+\s*[\|:：].*)$/i;
+  const sceneRe = /^\s*((?:第[一二三四五六七八九十百千\d]+[章幕场景节回]|Scene\s+\d+|ACT\s+[IVX\d]+|INT\.|EXT\.|内景|外景|镜头切至)[.．：:\s].*)/i;
+  const heads = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (headRe.test(lines[i]) || sceneRe.test(lines[i])) {
+      heads.push({ idx: i, title: lines[i].trim().slice(0, 80) });
+    }
+  }
+
+  const segments = [];
+  if (heads.length >= target / 2) {
+    // 有足够的章节/场景头，按头切分
+    for (let h = 0; h < heads.length; h++) {
+      const start = heads[h].idx;
+      const end = (h === heads.length - 1) ? (lines.length - 1) : (heads[h + 1].idx - 1);
+      segments.push({ startLine: start + 1, endLine: end + 1, title: heads[h].title });
+    }
+  } else {
+    // 无头或太少，按行数均分
+    const per = Math.max(1, Math.floor(lines.length / target));
+    for (let e = 0; e < target; e++) {
+      const start = e * per;
+      const end = (e === target - 1) ? (lines.length - 1) : Math.min(lines.length - 1, (e + 1) * per - 1);
+      if (start >= lines.length) break;
+      const preview = lines[start].trim().slice(0, 60);
+      segments.push({ startLine: start + 1, endLine: end + 1, title: preview || `Segment ${e + 1}` });
+    }
+  }
+
+  // 合并过多的 segments
+  while (segments.length > target) {
+    let minI = 0, minLen = Infinity;
+    for (let i = 0; i < segments.length; i++) {
+      const len = segments[i].endLine - segments[i].startLine;
+      if (len < minLen) { minLen = len; minI = i; }
+    }
+    const i = minI;
+    const j = (i === 0) ? 1 : i - 1;
+    const a = segments[Math.min(i, j)];
+    const b = segments[Math.max(i, j)];
+    const merged = {
+      startLine: Math.min(a.startLine, b.startLine),
+      endLine: Math.max(a.endLine, b.endLine),
+      title: (a.title + ' + ' + b.title).slice(0, 160)
+    };
+    segments.splice(Math.max(i, j), 1);
+    segments.splice(Math.min(i, j), 1, merged);
+  }
+  // 拆分不够的 segments
+  while (segments.length < target) {
+    let maxI = 0, maxLen = -1;
+    for (let i = 0; i < segments.length; i++) {
+      const len = segments[i].endLine - segments[i].startLine;
+      if (len > maxLen) { maxLen = len; maxI = i; }
+    }
+    const seg = segments[maxI];
+    if (seg.endLine <= seg.startLine) break; // 无法再拆
+    const mid = Math.floor((seg.startLine + seg.endLine) / 2);
+    const left = { startLine: seg.startLine, endLine: mid, title: seg.title + ' (A)' };
+    const right = { startLine: mid + 1, endLine: seg.endLine, title: seg.title + ' (B)' };
+    segments.splice(maxI, 1, left, right);
+  }
+  return segments;
+}
+
+const BREAKDOWN_CSV_HEADER = 'ep_id,arc_block,source_range,source_text';
+const BREAKDOWN_MODEL_HEADER = 'ep_id,arc_block,source_range'; // 模型只输出3列，source_text由服务端注入
+
+/**
+ * 将原文按 buildSourceRanges 的分行逻辑重新切分为行数组。
+ * 与 buildSourceRanges 内部的分行逻辑保持一致。
+ */
+function splitNovelToLines(text) {
+  let rawText = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  let lines = rawText.split('\n');
+  if (lines.length < 160) {
+    rawText = rawText
+      .replace(/([。！？!?])\s*/g, '$1\n')
+      .replace(/(\.)\s+(?=[A-Z\u4e00-\u9fff])/g, '$1\n')
+      .replace(/\s{2,}/g, '\n')
+      .replace(/((?:INT|EXT|内景|外景|镜头切至)[.．：:].+)/g, '\n$1\n');
+    lines = rawText.split('\n').filter(l => l.trim().length > 0);
+  }
+  return lines;
+}
+
+/**
+ * 给已完成的 breakdown CSV 注入 source_text 列。
+ * 如果模型已输出 source_text 则保留，否则从原文按行号提取。
+ */
+function injectSourceText(csv, novelText) {
+  if (!csv || !novelText) return csv;
+  const novelLines = splitNovelToLines(novelText);
+  const csvLines = csv.split('\n');
+  if (csvLines.length < 2) return csv;
+
+  const header = csvLines[0];
+  const hasSourceText = header.includes('source_text');
+  const result = [BREAKDOWN_CSV_HEADER];
+
+  for (let i = 1; i < csvLines.length; i++) {
+    const line = csvLines[i].trim();
+    if (!line) continue;
+    // 解析 CSV 行（简单 split，source_text 可能带引号）
+    const match = line.match(/^(E\d{3}),([^,]*),(\d+-\d+)/);
+    if (!match) { result.push(line); continue; }
+
+    const epId = match[1];
+    const arcBlock = match[2];
+    const rangeStr = match[3];
+    const [startLine, endLine] = rangeStr.split('-').map(Number);
+
+    // 提取原文（行号是 1-indexed）
+    const extractedLines = novelLines.slice(startLine - 1, endLine);
+    const sourceText = extractedLines.join('\n').trim();
+
+    result.push([epId, arcBlock, rangeStr, csvEscape(sourceText)].join(','));
+  }
+
+  return result.join('\n');
+}
+
+function csvEscape(value) {
+  const text = String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (!text) return '';
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function extractJsonPayload(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+
+  const fenced = raw.match(/```(?:json)?\s*\n([\s\S]*?)\n```/i);
+  const candidate = fenced ? fenced[1].trim() : raw;
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    // fall through
+  }
+
+  const firstBrace = candidate.indexOf('{');
+  const lastBrace = candidate.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(candidate.slice(firstBrace, lastBrace + 1));
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function extractBreakdownCsv(text, targetEpisodes) {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+
+  const fenced = raw.match(/```(?:csv)?\s*\n([\s\S]*?)\n```/i);
+  const candidate = (fenced ? fenced[1] : raw).trim();
+  const lines = candidate
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  const headerIndex = lines.findIndex(line => line === BREAKDOWN_MODEL_HEADER || line === BREAKDOWN_CSV_HEADER);
+  if (headerIndex === -1) return '';
+
+  const endIndex = Math.min(lines.length, headerIndex + targetEpisodes + 1);
+  return lines.slice(headerIndex, endIndex).join('\n');
+}
+
+function splitSummaryParts(text) {
+  return String(text || '')
+    .split(/[。！？.!?]+/)
+    .map(part => part.trim())
+    .filter(Boolean);
+}
+
+function buildAggregateCsvFromJson(payload, segments, targetEpisodes) {
+  const episodes = Array.isArray(payload?.episodes) ? payload.episodes : null;
+  if (!episodes || episodes.length === 0) return '';
+
+  const rows = [BREAKDOWN_CSV_HEADER];
+  for (let i = 0; i < targetEpisodes; i++) {
+    const episode = episodes[i] || {};
+    const segment = segments[i] || { startLine: 1, endLine: 1 };
+    const epId = `E${String(i + 1).padStart(3, '0')}`;
+    const arcBlock = String(episode.arc_block || episode.arc || `A${Math.floor(i / 10) + 1}`).trim();
+
+    rows.push([
+      epId,
+      arcBlock,
+      `${segment.startLine}-${segment.endLine}`
+    ].map(csvEscape).join(','));
+  }
+
+  return rows.join('\n');
+}
+
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          cell += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (ch === '\n') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else if (ch === '\r') {
+      if (text[i + 1] === '\n') i++;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+
+  if (cell || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function parseCsvTable(text) {
+  const csvText = extractBreakdownCsv(text, 200) || String(text || '').trim();
+  if (!csvText) return null;
+
+  const rows = parseCsvRows(csvText);
+  if (!rows.length) return null;
+
+  const headers = rows[0].map(cell => String(cell || '').trim());
+  const dataRows = rows.slice(1).filter(row => row.some(cell => String(cell || '').trim()));
+  return {
+    headers,
+    rows: dataRows.map(row => {
+      const record = {};
+      headers.forEach((header, index) => {
+        record[header] = String(row[index] || '').trim();
+      });
+      return record;
+    })
+  };
+}
+
+function parseSourceRange(rangeText) {
+  const match = String(rangeText || '').match(/(\d+)\s*-\s*(\d+)/);
+  if (!match) return null;
+  return {
+    startLine: Number(match[1]),
+    endLine: Number(match[2])
+  };
+}
+
+function buildChunkLineRanges(text, chunkCount, chunkSize) {
+  const normalized = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const ranges = [];
+
+  for (let i = 0; i < chunkCount; i++) {
+    const start = i * chunkSize;
+    const end = Math.min(normalized.length, start + chunkSize);
+    const before = normalized.slice(0, start);
+    const chunkText = normalized.slice(start, end);
+    const startLine = before ? before.split('\n').length : 1;
+    const lineCount = chunkText ? chunkText.split('\n').length : 1;
+    ranges.push({
+      startLine,
+      endLine: startLine + lineCount - 1
+    });
+  }
+
+  return ranges;
+}
+
+function findBestChunkRow(rows, localMidLine, localTotalLines) {
+  let bestRow = null;
+  let bestDistance = Infinity;
+
+  for (const row of rows) {
+    const range = parseSourceRange(row.source_range);
+    if (!range) continue;
+    if (localMidLine >= range.startLine && localMidLine <= range.endLine) {
+      return row;
+    }
+    const rowMid = Math.floor((range.startLine + range.endLine) / 2);
+    const distance = Math.abs(localMidLine - rowMid);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestRow = row;
+    }
+  }
+
+  if (bestRow) return bestRow;
+  if (!rows.length) return null;
+
+  const ratio = localTotalLines > 1 ? (localMidLine - 1) / Math.max(1, localTotalLines - 1) : 0;
+  const fallbackIndex = Math.max(0, Math.min(rows.length - 1, Math.round(ratio * (rows.length - 1))));
+  return rows[fallbackIndex];
+}
+
+function buildAggregateCsvFromChunkResults(chunks, segments, novelText, chunkSize) {
+  if (!novelText || !Array.isArray(chunks) || !chunks.length) {
+    console.log(`[📚 deterministic merge] 跳過: novelText=${!!novelText}, chunks=${Array.isArray(chunks) ? chunks.length : 'N/A'}`);
+    return '';
+  }
+
+  // 每个 chunk 只做 CSV 解析（确定性合并仅处理 CSV chunk）
+  const chunkTables = chunks.map((chunk, i) => {
+    const csvTable = parseCsvTable(chunk);
+    if (csvTable && csvTable.rows.length > 0) return csvTable;
+
+    console.log(`[📚 deterministic merge] chunk ${i}: CSV 解析失敗，前100字: ${String(chunk).slice(0, 100)}`);
+    return null;
+  });
+
+  if (chunkTables.some(table => !table || !table.rows.length)) {
+    console.log(`[📚 deterministic merge] 放棄: ${chunkTables.map((t, i) => `chunk${i}=${t ? t.rows.length + '行' : 'null'}`).join(', ')}`);
+    return '';
+  }
+
+  const chunkRanges = buildChunkLineRanges(novelText, chunks.length, chunkSize);
+  const rows = [BREAKDOWN_CSV_HEADER];
+
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index];
+    const epId = `E${String(index + 1).padStart(3, '0')}`;
+    const globalMidLine = Math.floor((segment.startLine + segment.endLine) / 2);
+
+    let chunkIndex = chunkRanges.findIndex(range => globalMidLine >= range.startLine && globalMidLine <= range.endLine);
+    if (chunkIndex === -1) {
+      chunkIndex = Math.max(0, Math.min(chunkRanges.length - 1, Math.round(index / Math.max(1, segments.length - 1) * (chunkRanges.length - 1))));
+    }
+
+    const chunkRange = chunkRanges[chunkIndex];
+    const chunkTable = chunkTables[chunkIndex];
+    const localMidLine = Math.max(1, globalMidLine - chunkRange.startLine + 1);
+    const localTotalLines = Math.max(1, chunkRange.endLine - chunkRange.startLine + 1);
+    const sourceRow = findBestChunkRow(chunkTable.rows, localMidLine, localTotalLines) || {};
+
+    const arcBlock = sourceRow.arc_block || `A${Math.floor(index / 10) + 1}`;
+
+    rows.push([
+      epId,
+      arcBlock,
+      `${segment.startLine}-${segment.endLine}`
+    ].map(csvEscape).join(','));
+  }
+
+  return rows.join('\n');
+}
+
+// 从文本中提取 <thinking> 标签内容
+function extractThinking(text) {
+  const match = text.match(/<thinking>([\s\S]*?)<\/thinking>/);
+  if (match) {
+    return { thinking: match[1].trim(), content: text.replace(/<thinking>[\s\S]*?<\/thinking>/, '').trim() };
+  }
+  // JSON agent：如果 { 前面有大段文字，视为 thinking
+  if (text.includes('{')) {
+    const firstBrace = text.indexOf('{');
+    if (firstBrace > 80) {
+      return { thinking: text.substring(0, firstBrace).trim(), content: text.substring(firstBrace) };
+    }
+  }
+  return { thinking: null, content: text };
+}
+
+// 流式输出时实时检测 <thinking> 标签边界
+class ThinkingStreamDetector {
+  constructor() {
+    this.buffer = '';
+    this.inThinking = false;
+    this.thinkingStarted = false;
+  }
+
+  feed(chunk) {
+    const events = [];
+    this.buffer += chunk;
+
+    while (this.buffer.length > 0) {
+      if (!this.inThinking) {
+        const openIdx = this.buffer.indexOf('<thinking>');
+        if (openIdx === -1) {
+          // No tag found — check if buffer might have a partial tag at end
+          const safeCut = this.buffer.length > 10 ? this.buffer.length - 10 : 0;
+          if (safeCut > 0) {
+            events.push({ type: 'content', text: this.buffer.substring(0, safeCut) });
+            this.buffer = this.buffer.substring(safeCut);
+          }
+          break;
+        }
+        // Emit content before tag
+        if (openIdx > 0) {
+          events.push({ type: 'content', text: this.buffer.substring(0, openIdx) });
+        }
+        this.buffer = this.buffer.substring(openIdx + 10); // skip '<thinking>'
+        this.inThinking = true;
+        this.thinkingStarted = true;
+      } else {
+        const closeIdx = this.buffer.indexOf('</thinking>');
+        if (closeIdx === -1) {
+          // Still inside thinking — check for partial closing tag
+          const safeCut = this.buffer.length > 11 ? this.buffer.length - 11 : 0;
+          if (safeCut > 0) {
+            events.push({ type: 'thinking', text: this.buffer.substring(0, safeCut) });
+            this.buffer = this.buffer.substring(safeCut);
+          }
+          break;
+        }
+        // Emit thinking content up to close tag
+        if (closeIdx > 0) {
+          events.push({ type: 'thinking', text: this.buffer.substring(0, closeIdx) });
+        }
+        this.buffer = this.buffer.substring(closeIdx + 11); // skip '</thinking>'
+        this.inThinking = false;
+      }
+    }
+
+    return events;
+  }
+
+  flush() {
+    const events = [];
+    if (this.buffer.length > 0) {
+      events.push({ type: this.inThinking ? 'thinking' : 'content', text: this.buffer });
+      this.buffer = '';
+    }
+    return events;
+  }
+}
+
+async function consumeSseResponse(body, { onData, onChunk } = {}) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let chunkCount = 0;
+
+  const flushBuffer = (final = false) => {
+    let normalized = buffer.replace(/\r\n/g, '\n');
+    let boundaryIndex = normalized.indexOf('\n\n');
+
+    while (boundaryIndex !== -1) {
+      const rawEvent = normalized.slice(0, boundaryIndex);
+      normalized = normalized.slice(boundaryIndex + 2);
+
+      for (const rawLine of rawEvent.split('\n')) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith(':') || !line.startsWith('data:')) continue;
+        onData?.(line.slice(5).trim());
+      }
+
+      boundaryIndex = normalized.indexOf('\n\n');
+    }
+
+    buffer = final ? '' : normalized;
+
+    if (final && normalized.trim()) {
+      for (const rawLine of normalized.split('\n')) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith(':') || !line.startsWith('data:')) continue;
+        onData?.(line.slice(5).trim());
+      }
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunkCount++;
+    onChunk?.(chunkCount, value);
+    buffer += decoder.decode(value, { stream: true });
+    flushBuffer(false);
+  }
+
+  buffer += decoder.decode();
+  flushBuffer(true);
+
+  return { chunkCount };
+}
+
 // 加载agent的所有skills内容（根据版本配置动态调整）
 function loadAgentSkills(skillIds) {
   const maxSkills = runtimeConfig.maxSkills || 1;
@@ -280,7 +895,7 @@ function loadAgentSkills(skillIds) {
   return loaded.join('\n');
 }
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = ROOT_DIR;
 
 // 读取.env文件
 try {
@@ -327,259 +942,23 @@ app.options('*', (req, res) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(join(__dirname, '..')));
 
-// ==================== 用户认证系统（注册/登录/JWT）====================
+app.get('/favicon.ico', (req, res) => {
+  res.status(204).end();
+});
 
-const USERS_FILE = join(__dirname, 'users.json');
+app.get('/openapi.json', (req, res) => {
+  const protocol = req.get('x-forwarded-proto') || req.protocol;
+  const host = req.get('host');
+  const baseUrl = host ? `${protocol}://${host}` : '';
+  res.json(buildOpenApiSpec(baseUrl));
+});
+
+app.get('/swagger', (req, res) => {
+  res.type('html').send(buildSwaggerUiHtml('/openapi.json'));
+});
+
+// ==================== Auth removed — all APIs are public ====================
 const userRequests = new Map(); // 用户当前请求状态
-
-// 注册
-app.post('/api/auth/register', async (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password) return res.status(400).json({ error: '缺少 username/password' });
-  if (String(username).length < 3) return res.status(400).json({ error: '用户名至少3位' });
-  if (String(password).length < 6) return res.status(400).json({ error: '密码至少6位' });
-
-  const users = loadUsers();
-  // users: { byUsername: { [username]: user } }
-  const byUsername = users.byUsername || {};
-  if (byUsername[username]) return res.status(400).json({ error: '用户名已存在' });
-
-  const passwordHash = await bcrypt.hash(password, 10);
-  const user = { id: crypto.randomUUID(), username, passwordHash, createdAt: new Date().toISOString() };
-  byUsername[username] = user;
-  users.byUsername = byUsername;
-  saveUsers(users);
-
-  const token = issueToken(user);
-  res.json({ token, user: { id: user.id, username: user.username } });
-});
-
-// 登录
-app.post('/api/auth/login', async (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password) return res.status(400).json({ error: '缺少 username/password' });
-
-  const users = loadUsers();
-  const user = users.byUsername?.[username];
-  if (!user) return res.status(400).json({ error: '用户名或密码错误' });
-
-  const ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok) return res.status(400).json({ error: '用户名或密码错误' });
-
-  const token = issueToken(user);
-  res.json({ token, user: { id: user.id, username: user.username } });
-});
-
-// 验证
-app.get('/api/auth/me', requireAuth, (req, res) => {
-  res.json({ user: { id: req.user.id, username: req.user.username } });
-});
-
-// 兼容旧前端：verify/logout
-app.get('/api/auth/verify', requireAuth, (req, res) => {
-  res.json({ ok: true, user: { id: req.user.id, username: req.user.username } });
-});
-app.post('/api/auth/logout', (req, res) => {
-  // JWT无服务端会话，前端清token即可
-  res.json({ ok: true });
-});
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
-if (!process.env.JWT_SECRET) {
-  console.warn('⚠️ JWT_SECRET 未配置：当前为临时密钥（重启会使登录失效）。请在Render环境变量中设置 JWT_SECRET');
-}
-
-function issueToken(user) {
-  return jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30d' });
-}
-
-function requireAuth(req, res, next) {
-  try {
-    const auth = req.headers.authorization || '';
-    const m = auth.match(/^Bearer\s+(.+)$/i);
-    if (!m) return res.status(401).json({ error: 'Unauthorized' });
-    const payload = jwt.verify(m[1], JWT_SECRET);
-    req.user = payload;
-    return next();
-  } catch (e) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-}
-
-// 读取用户数据
-function loadUsers() {
-  try {
-    if (existsSync(USERS_FILE)) {
-      return JSON.parse(readFileSync(USERS_FILE, 'utf-8'));
-    }
-  } catch (e) {}
-  return {};
-}
-
-// 保存用户数据
-function saveUsers(users) {
-  writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-}
-
-// 生成token
-function generateToken() {
-  return crypto.randomBytes(32).toString('hex');
-}
-
-// 哈希密码
-function hashPassword(password) {
-  return crypto.createHash('sha256').update(password + 'fizzdragon_salt').digest('hex');
-}
-
-// 验证token中间件
-function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: '未登录' });
-  }
-  
-  const token = authHeader.split(' ')[1];
-  const users = loadUsers();
-  const user = Object.values(users).find(u => u.token === token);
-  
-  if (!user) {
-    return res.status(401).json({ error: 'Token无效' });
-  }
-  
-  req.user = user;
-  next();
-}
-
-// 注册
-app.post('/api/auth/register', (req, res) => {
-  const { username, password } = req.body;
-  
-  if (!username || !password) {
-    return res.status(400).json({ error: '用户名和密码必填' });
-  }
-  
-  if (username.length < 3 || username.length > 20) {
-    return res.status(400).json({ error: '用户名3-20个字符' });
-  }
-  
-  if (password.length < 6) {
-    return res.status(400).json({ error: '密码至少6个字符' });
-  }
-  
-  const users = loadUsers();
-  
-  if (users[username]) {
-    return res.status(400).json({ error: '用户名已存在' });
-  }
-  
-  users[username] = {
-    username,
-    password: hashPassword(password),
-    createdAt: new Date().toISOString(),
-    token: null
-  };
-  
-  saveUsers(users);
-  console.log(`[Auth] 新用户注册: ${username}`);
-  res.json({ ok: true, message: '注册成功' });
-});
-
-// 登录
-app.post('/api/auth/login', (req, res) => {
-  const { username, password } = req.body;
-  
-  if (!username || !password) {
-    return res.status(400).json({ error: '用户名和密码必填' });
-  }
-  
-  const users = loadUsers();
-  const user = users[username];
-  
-  if (!user || user.password !== hashPassword(password)) {
-    return res.status(401).json({ error: '用户名或密码错误' });
-  }
-  
-  // 生成新token
-  const token = generateToken();
-  users[username].token = token;
-  users[username].lastLogin = new Date().toISOString();
-  saveUsers(users);
-  
-  console.log(`[Auth] 用户登录: ${username}`);
-  res.json({
-    ok: true,
-    token,
-    user: { username, createdAt: user.createdAt }
-  });
-});
-
-// 验证token
-app.get('/api/auth/verify', (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: '未登录' });
-  }
-  
-  const token = authHeader.split(' ')[1];
-  const users = loadUsers();
-  const user = Object.values(users).find(u => u.token === token);
-  
-  if (!user) {
-    return res.status(401).json({ error: 'Token无效' });
-  }
-  
-  res.json({ ok: true, user: { username: user.username } });
-});
-
-// 登出
-app.post('/api/auth/logout', (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
-    const users = loadUsers();
-    const user = Object.values(users).find(u => u.token === token);
-    if (user) {
-      users[user.username].token = null;
-      saveUsers(users);
-      console.log(`[Auth] 用户登出: ${user.username}`);
-    }
-  }
-  res.json({ ok: true });
-});
-
-// 🔧 管理员接口：列出所有用户（不显示密码）
-app.get('/api/admin/users', (req, res) => {
-  const users = loadUsers();
-  const userList = Object.entries(users).map(([username, data]) => ({
-    username,
-    createdAt: data.createdAt || 'unknown',
-    lastLogin: data.lastLogin || 'never',
-    isOnline: !!data.token,
-    projectCount: data.projectCount || 0
-  }));
-  res.json({ 
-    total: userList.length,
-    users: userList 
-  });
-});
-
-// 🔧 管理员接口：踢出用户（清除token）
-app.post('/api/admin/kick', (req, res) => {
-  const { username } = req.body;
-  if (!username) {
-    return res.status(400).json({ error: '缺少用户名' });
-  }
-  
-  const users = loadUsers();
-  if (!users[username]) {
-    return res.status(404).json({ error: '用户不存在' });
-  }
-  
-  users[username].token = null;
-  saveUsers(users);
-  console.log(`[Admin] 踢出用户: ${username}`);
-  res.json({ ok: true, message: `已踢出用户 ${username}` });
-});
 
 // 检查用户是否有正在进行的请求
 function checkUserRequest(username) {
@@ -597,6 +976,415 @@ function clearUserRequest(username) {
 }
 
 const PORT = process.env.PORT || 3001;
+const HOST = process.env.HOST || '0.0.0.0';
+const FIZZDRAGON_STUDIO_BASE_URL = process.env.FIZZDRAGON_STUDIO_BASE_URL || 'https://fizzdragon.fizzspace.cn/studio';
+const LOCAL_SCENE_SHADOW_PATH = join(ROOT_DIR, 'result', 'local-scene-shot-values.json');
+const SCENE_MENTION_RE = /<mention\s+([^>]*)>([\s\S]*?)<\/mention>/gi;
+const STORYBOARD_PROXY_QUERY_PAGE_SIZE = 100;
+const STORYBOARD_PROXY_QUERY_MAX_PAGES = 20;
+const STORYBOARD_PROXY_SAVE_MAX_ATTEMPTS = 2;
+const STORYBOARD_PROXY_SAVE_VERIFY_RETRIES = 4;
+const STORYBOARD_PROXY_SAVE_VERIFY_DELAY_MS = 600;
+
+function isSuccessResponse(payload) {
+  return !!payload && (
+    payload.code === 200
+    || payload.code === 'SUCCESS'
+    || payload.success === true
+  );
+}
+
+function getShotRows(payload) {
+  if (Array.isArray(payload?.data?.list)) return payload.data.list;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getStoryboardExpectedRowCount(datas) {
+  if (!Array.isArray(datas) || datas.length <= 1) {
+    return 0;
+  }
+  return Math.max(0, datas.length - 1);
+}
+
+function hasStoryboardShotCells(shot) {
+  return Array.isArray(shot?.shotValues) && shot.shotValues.length > 0;
+}
+
+async function fetchAllStoryboardShots(req, storyBoardId) {
+  const shots = [];
+  let totalCount = 0;
+
+  for (let page = 1; page <= STORYBOARD_PROXY_QUERY_MAX_PAGES; page += 1) {
+    const upstream = await forwardFizzdragonJson(
+      req,
+      `${FIZZDRAGON_STUDIO_BASE_URL}/api/user/shot/queryPage`,
+      {
+        storyBoardId,
+        page,
+        pageSize: STORYBOARD_PROXY_QUERY_PAGE_SIZE
+      }
+    );
+
+    if (!upstream.ok || !isSuccessResponse(upstream.payload)) {
+      throw new Error(upstream?.payload?.message || 'Failed to query storyboard shots');
+    }
+
+    const list = getShotRows(upstream.payload);
+    totalCount = Number(upstream?.payload?.data?.totalCount || totalCount || 0);
+    shots.push(...list);
+
+    if (!list.length || list.length < STORYBOARD_PROXY_QUERY_PAGE_SIZE || (totalCount > 0 && shots.length >= totalCount)) {
+      break;
+    }
+  }
+
+  return shots;
+}
+
+async function deleteStoryboardShots(req, storyBoardId) {
+  const shots = await fetchAllStoryboardShots(req, storyBoardId);
+
+  for (const shot of shots) {
+    if (!shot?.shotId) continue;
+    const upstream = await forwardFizzdragonJson(
+      req,
+      `${FIZZDRAGON_STUDIO_BASE_URL}/api/user/shot/delete/${shot.shotId}`
+    );
+    if (!upstream.ok || !isSuccessResponse(upstream.payload)) {
+      throw new Error(upstream?.payload?.message || `Failed to delete storyboard shot ${shot.shotId}`);
+    }
+  }
+}
+
+async function verifyStoryboardSaveIntegrity(req, storyBoardId, expectedRowCount) {
+  if (!storyBoardId || expectedRowCount <= 0) {
+    return {
+      ok: true,
+      shotCount: 0,
+      hydratedShotCount: 0
+    };
+  }
+
+  let lastShotCount = 0;
+  let lastHydratedShotCount = 0;
+
+  for (let attempt = 1; attempt <= STORYBOARD_PROXY_SAVE_VERIFY_RETRIES; attempt += 1) {
+    const shots = await fetchAllStoryboardShots(req, storyBoardId);
+    lastShotCount = shots.length;
+    lastHydratedShotCount = shots.filter(hasStoryboardShotCells).length;
+
+    if (lastHydratedShotCount >= expectedRowCount) {
+      return {
+        ok: true,
+        shotCount: lastShotCount,
+        hydratedShotCount: lastHydratedShotCount
+      };
+    }
+
+    if (attempt < STORYBOARD_PROXY_SAVE_VERIFY_RETRIES) {
+      await sleep(STORYBOARD_PROXY_SAVE_VERIFY_DELAY_MS);
+    }
+  }
+
+  return {
+    ok: false,
+    shotCount: lastShotCount,
+    hydratedShotCount: lastHydratedShotCount
+  };
+}
+
+function buildStoryboardSaveFailurePayload(message, details = {}) {
+  return {
+    code: 500,
+    success: false,
+    message,
+    ...details
+  };
+}
+
+async function forwardStoryboardSaveWithRetry(req, payload) {
+  const expectedRowCount = getStoryboardExpectedRowCount(payload?.datas);
+  let lastUpstream = null;
+  let lastIntegrity = null;
+
+  for (let attempt = 1; attempt <= STORYBOARD_PROXY_SAVE_MAX_ATTEMPTS; attempt += 1) {
+    const upstream = await forwardFizzdragonJson(
+      req,
+      `${FIZZDRAGON_STUDIO_BASE_URL}/api/ai/chat/save/storyboard`,
+      {
+        episodeId: payload?.episodeId,
+        datas: payload?.datas,
+        autoload: payload?.autoload
+      }
+    );
+    lastUpstream = upstream;
+
+    if (upstream.ok && isSuccessResponse(upstream.payload)) {
+      lastIntegrity = await verifyStoryboardSaveIntegrity(req, payload?.episodeId, expectedRowCount);
+      if (lastIntegrity.ok) {
+        return {
+          upstream,
+          integrity: lastIntegrity,
+          attempts: attempt
+        };
+      }
+
+      console.warn(
+        '[fizzstudio/saveStoryboard] incomplete save detected, retrying:',
+        JSON.stringify({
+          episodeId: payload?.episodeId,
+          attempt,
+          expectedRowCount,
+          shotCount: lastIntegrity.shotCount,
+          hydratedShotCount: lastIntegrity.hydratedShotCount
+        })
+      );
+    } else {
+      console.warn(
+        '[fizzstudio/saveStoryboard] upstream business failure, retrying:',
+        JSON.stringify({
+          episodeId: payload?.episodeId,
+          attempt,
+          payload: upstream?.payload || null
+        })
+      );
+    }
+
+    if (attempt >= STORYBOARD_PROXY_SAVE_MAX_ATTEMPTS || !payload?.episodeId) {
+      break;
+    }
+
+    await deleteStoryboardShots(req, payload.episodeId);
+    await sleep(STORYBOARD_PROXY_SAVE_VERIFY_DELAY_MS);
+  }
+
+  if (lastUpstream?.ok && isSuccessResponse(lastUpstream.payload) && lastIntegrity && !lastIntegrity.ok) {
+    return {
+      upstream: {
+        ok: true,
+        status: 200,
+        payload: buildStoryboardSaveFailurePayload('Storyboard save incomplete after retry', {
+          shotCount: lastIntegrity.shotCount,
+          hydratedShotCount: lastIntegrity.hydratedShotCount,
+          expectedRowCount
+        })
+      },
+      integrity: lastIntegrity,
+      attempts: STORYBOARD_PROXY_SAVE_MAX_ATTEMPTS
+    };
+  }
+
+  return {
+    upstream: lastUpstream,
+    integrity: lastIntegrity,
+    attempts: STORYBOARD_PROXY_SAVE_MAX_ATTEMPTS
+  };
+}
+
+function readLocalSceneShadowStore() {
+  if (!existsSync(LOCAL_SCENE_SHADOW_PATH)) {
+    return {};
+  }
+  try {
+    return JSON.parse(readFileSync(LOCAL_SCENE_SHADOW_PATH, 'utf-8'));
+  } catch (error) {
+    console.warn('[scene-shadow] failed to read store:', error?.message || error);
+    return {};
+  }
+}
+
+function writeLocalSceneShadowStore(store) {
+  writeFileSync(LOCAL_SCENE_SHADOW_PATH, JSON.stringify(store, null, 2));
+}
+
+function buildSceneShadowKey(shotId, shotColumnId) {
+  return `${String(shotId || '')}:${String(shotColumnId || '')}`;
+}
+
+function persistLocalSceneShadow(payload = {}) {
+  const key = buildSceneShadowKey(payload.shotId, payload.shotColumnId);
+  if (!payload.shotId || !payload.shotColumnId) return;
+
+  const store = readLocalSceneShadowStore();
+  if (!payload.sceneId && !payload.sceneName) {
+    delete store[key];
+  } else {
+    store[key] = {
+      sceneId: String(payload.sceneId || payload.value || '').trim(),
+      sceneName: String(payload.sceneName || '').trim(),
+      worldId: String(payload.worldId || '').trim()
+    };
+  }
+  writeLocalSceneShadowStore(store);
+}
+
+function getLocalSceneShadow(shotId, shotColumnId) {
+  const store = readLocalSceneShadowStore();
+  return store[buildSceneShadowKey(shotId, shotColumnId)] || null;
+}
+
+function extractSceneMentionEntry(text) {
+  const source = String(text || '');
+  if (!source.includes('<mention')) return null;
+
+  SCENE_MENTION_RE.lastIndex = 0;
+  let match = null;
+  while ((match = SCENE_MENTION_RE.exec(source))) {
+    const attrs = match[1] || '';
+    const name = String(match[2] || '').trim();
+    if (!/type="scene"/i.test(attrs) || !name) continue;
+    const idMatch = attrs.match(/\bid="([^"]+)"/i);
+    return {
+      sceneId: String(idMatch?.[1] || '').trim(),
+      sceneName: name
+    };
+  }
+  return null;
+}
+
+function buildSyntheticScenePayload(sceneId, sceneName, worldId = '') {
+  if (!sceneId && !sceneName) return null;
+  return {
+    id: sceneId || sceneName,
+    name: sceneName || sceneId,
+    worldId: worldId || '',
+    sceneImgPath: []
+  };
+}
+
+function inferSceneEntryFromShot(shot) {
+  const shotValues = Array.isArray(shot?.shotValues) ? shot.shotValues : [];
+  for (const cell of shotValues) {
+    const sourceText = cell?.richText?.content || cell?.value || '';
+    const mentionEntry = extractSceneMentionEntry(sourceText);
+    if (mentionEntry) {
+      return buildSyntheticScenePayload(mentionEntry.sceneId, mentionEntry.sceneName);
+    }
+  }
+
+  return null;
+}
+
+function hydrateSceneCellFromLocalState(shot, cell) {
+  if (cell?.presetColumnKey !== 'scene') return false;
+  if (Array.isArray(cell?.scenes) && cell.scenes.length > 0) return true;
+
+  const shadowEntry = getLocalSceneShadow(shot?.shotId, cell?.shotColumnId);
+  const scenePayload = shadowEntry?.sceneId || shadowEntry?.sceneName
+    ? buildSyntheticScenePayload(shadowEntry.sceneId, shadowEntry.sceneName, shadowEntry.worldId)
+    : inferSceneEntryFromShot(shot);
+
+  if (!scenePayload) {
+    return false;
+  }
+
+  cell.value = scenePayload.id || scenePayload.name;
+  cell.values = scenePayload.id ? [scenePayload.id] : null;
+  cell.scenes = [scenePayload];
+  return true;
+}
+
+function needsRichTextDetail(cell) {
+  if (!cell?.id) return false;
+  const isRichText = cell.shotColumnType === 'RICH_TEXT' || cell.presetColumnKey === 'description';
+  if (!isRichText) return false;
+  return !cell.richText?.content && !cell.value;
+}
+
+function needsSceneDetail(cell) {
+  if (!cell?.id) return false;
+  if (cell.presetColumnKey !== 'scene') return false;
+  const hasScenes = Array.isArray(cell.scenes) && cell.scenes.length > 0;
+  const hasValueRef = (Array.isArray(cell.values) && cell.values.length > 0) || !!cell.value;
+  return !hasScenes && hasValueRef;
+}
+
+function buildFizzdragonForwardHeaders(req, includeJsonContentType = true) {
+  const headers = {
+    accept: 'application/json',
+  };
+
+  if (includeJsonContentType) {
+    headers['content-type'] = 'application/json';
+  }
+  if (req.headers.authorization) {
+    headers.authorization = req.headers.authorization;
+  }
+  if (req.headers.cookie) {
+    headers.cookie = req.headers.cookie;
+  }
+  if (req.headers['accept-language']) {
+    headers['accept-language'] = req.headers['accept-language'];
+  }
+  if (req.headers['user-agent']) {
+    headers['user-agent'] = req.headers['user-agent'];
+  }
+
+  return headers;
+}
+
+async function forwardFizzdragonJson(req, targetUrl, body) {
+  const response = await fetch(targetUrl, {
+    method: 'POST',
+    headers: buildFizzdragonForwardHeaders(req, body !== undefined),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch (error) {
+    payload = text;
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    payload,
+  };
+}
+
+async function hydrateMissingShotRichText(req, payload) {
+  if (!isSuccessResponse(payload)) return payload;
+
+  const pendingCells = [];
+  getShotRows(payload).forEach((shot) => {
+    if (!Array.isArray(shot?.shotValues)) return;
+    shot.shotValues.forEach((cell, cellIndex) => {
+      if (hydrateSceneCellFromLocalState(shot, cell)) {
+        return;
+      }
+      if (needsRichTextDetail(cell) || needsSceneDetail(cell)) {
+        pendingCells.push({ shot, cellIndex, cellId: cell.id });
+      }
+    });
+  });
+
+  await Promise.all(pendingCells.map(async ({ shot, cellIndex, cellId }) => {
+    try {
+      const detail = await forwardFizzdragonJson(
+        req,
+        `${FIZZDRAGON_STUDIO_BASE_URL}/api/user/shotValue/detail/${cellId}`
+      );
+      if (!isSuccessResponse(detail.payload) || !detail.payload?.data) return;
+      shot.shotValues[cellIndex] = {
+        ...shot.shotValues[cellIndex],
+        ...detail.payload.data,
+      };
+      hydrateSceneCellFromLocalState(shot, shot.shotValues[cellIndex]);
+    } catch (error) {
+      console.warn('[fizzstudio/queryShotList] hydrate rich text failed:', cellId, error?.message || error);
+    }
+  }));
+
+  return payload;
+}
 
 // 通过OpenClaw CLI调用Claude
 async function callViaOpenClaw(systemPrompt, userMessage) {
@@ -691,7 +1479,7 @@ let totalTokens = { input: 0, output: 0, cost: 0 };
 const TOKEN_PRICE = { input: 0.003 / 1000, output: 0.015 / 1000 }; // Sonnet pricing
 
 // ========== 並發限制 + 請求隊列管理 ==========
-const MAX_CONCURRENT = 3;  // 最多3個智能體同時運行
+const MAX_CONCURRENT = Math.max(1, Number(process.env.MAX_CONCURRENT_PIPELINE || process.env.MAX_CONCURRENT || 3));  // 智能體同時運行上限
 let activeRequests = 0;    // 當前運行中的請求數
 let requestQueue = [];     // 等待隊列
 let requestIdCounter = 0;  // 請求ID計數器
@@ -750,10 +1538,10 @@ async function callClaude(systemPrompt, userMessage, agentId = '', options = {})
   });
 }
 
-// 初始化Anthropic SDK
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
-});
+// 初始化Anthropic SDK（没有key时延迟到实际调用时报错，不阻塞启动）
+const anthropic = process.env.ANTHROPIC_API_KEY
+  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  : null;
 
 // ========== 🛡️ 重试机制 + Provider备份 (Bug#5永久解决方案) ==========
 const RETRY_CONFIG = {
@@ -764,7 +1552,48 @@ const RETRY_CONFIG = {
 };
 
 // 备用Provider顺序
-const FALLBACK_PROVIDERS = ['deepseek', 'openrouter'];
+const FALLBACK_PROVIDERS = ['dashscope', 'deepseek', 'openrouter'];
+
+const STABLE_PIPELINE_SEED = Number(process.env.PIPELINE_STABLE_SEED || 20260319);
+const STABLE_DASHSCOPE_AGENT_IDS = new Set([
+  'story_bible_extractor',
+  'story_breakdown_pack',
+  'screenwriter',
+  'asset_extractor',
+  'asset_extractor_repair',
+  'asset_qc_gate',
+  'storyboard_csv',
+  'character_costume'
+]);
+
+function resolveOpenAICompatibleModel(provider, providerId, agentId, options, useReasoner, longOutputAgents) {
+  if (useReasoner) return 'deepseek-reasoner';
+
+  return longOutputAgents.includes(agentId) ? provider.models.best : provider.models.fast;
+}
+
+function resolveGenerationSettings(agentId = '', options = {}, providerId = currentProvider) {
+  const settings = {};
+
+  if (options.temperature != null) settings.temperature = Number(options.temperature);
+  if (options.top_p != null) settings.top_p = Number(options.top_p);
+  if (options.top_k != null) settings.top_k = Number(options.top_k);
+  if (options.seed != null) settings.seed = Number(options.seed);
+
+  if (options.generationMode === 'stable' && providerId === 'dashscope' && STABLE_DASHSCOPE_AGENT_IDS.has(agentId)) {
+    if (settings.seed == null) settings.seed = STABLE_PIPELINE_SEED;
+    if (settings.temperature == null && settings.top_p == null) settings.top_p = 0.01;
+    if (settings.top_k == null) settings.top_k = 1;
+  }
+
+  if (options.responseFormat?.type) {
+    settings.response_format = options.responseFormat;
+  } else if (options.generationMode === 'stable' && providerId === 'dashscope' && needsJsonOutput(agentId)) {
+    settings.response_format = { type: 'json_object' };
+  }
+
+  return settings;
+}
 
 // 带重试的API调用包装器
 async function callWithRetry(callFn, agentId = '') {
@@ -800,55 +1629,61 @@ async function callWithRetry(callFn, agentId = '') {
 
 // 带Provider备份的调用
 async function callWithFallback(systemPrompt, userMessage, agentId = '', options = {}) {
-  const originalProvider = currentProvider;
+  const preferredProvider = options.provider && PROVIDERS[options.provider]
+    ? options.provider
+    : currentProvider;
+  const providerOrder = options.disableFallback
+    ? [preferredProvider]
+    : [preferredProvider, ...FALLBACK_PROVIDERS.filter((provider) => provider !== preferredProvider)];
   let lastError = null;
-  
-  for (const provider of FALLBACK_PROVIDERS) {
-    if (!process.env[`${provider.toUpperCase()}_API_KEY`] && provider !== 'deepseek') {
+
+  for (const provider of providerOrder) {
+    const providerKey = getApiKeyForProvider(provider);
+    if (!providerKey) {
       continue; // 跳过没有配置key的provider
     }
-    
+
     try {
-      currentProvider = provider;
       const result = await callWithRetry(
-        () => callOpenAICompatibleCore(systemPrompt, userMessage, agentId, options),
+        () => callOpenAICompatibleCore(systemPrompt, userMessage, agentId, options, provider),
         agentId
       );
-      currentProvider = originalProvider;
       return result;
     } catch (err) {
-      console.log(`❌ ${provider} 失败 (${agentId}): ${err.message}`);
+      console.log(`❌ ${provider} 失败 (${agentId}): ${err.message || err}`);
       lastError = err;
     }
   }
-  
-  currentProvider = originalProvider;
-  throw new Error(`所有Provider都失败了 (${agentId}): ${lastError?.message || '未知错误'}`);
+
+  throw new Error(`所有Provider都失败了 (${agentId}): ${lastError?.message || String(lastError) || '未知错误'}`);
 }
 
 // ========== DeepSeek/OpenRouter API调用 (OpenAI兼容) ==========
-async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '', options = {}) {
-  const provider = PROVIDERS[currentProvider];
+async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '', options = {}, providerId = currentProvider) {
+  const provider = PROVIDERS[providerId];
   const baseUrl = provider.baseUrl;
-  const apiKey = currentProvider === 'deepseek' 
-    ? process.env.DEEPSEEK_API_KEY 
-    : process.env.OPENROUTER_API_KEY;
+  const apiKey = getApiKeyForProvider(providerId);
   
   if (!apiKey) {
-    throw new Error(`Missing API key for ${currentProvider}. Set ${currentProvider.toUpperCase()}_API_KEY in .env`);
+    throw new Error(`Missing API key for ${providerId}. Set ${providerId.toUpperCase()}_API_KEY in .env`);
   }
   
-  const needsLongOutput = ['storyboard', 'narrative', 'chapters', 'concept', 'screenwriter', 'character', 'novelist', 'story_architect', 'episode_planner'].includes(agentId);
+  const needsLongOutput = ['storyboard', 'storyboard_csv', 'narrative', 'chapters', 'concept', 'screenwriter', 'character', 'novelist', 'story_architect', 'episode_planner', 'aggregate', 'story_breakdown_pack'].includes(agentId);
   // 🔧 分镜不再强制使用reasoner（太慢），改用普通模型+更大max_tokens
   // 前端可以指定useReasoner强制使用
-  const useReasoner = options.useReasoner === true && currentProvider === 'deepseek';
-  const model = useReasoner ? 'deepseek-reasoner' : (needsLongOutput ? provider.models.standard : provider.models.fast);
-  
+  const useReasoner = options.useReasoner === true && providerId === 'deepseek';
+
   // 分镜/小说需要更多tokens
-  // ⚠️ DeepSeek所有模型max_tokens上限都是8192！（包括reasoner）
-  // 虽然API可能接受更高值，但响应质量会下降
-  const longOutputAgents = ['storyboard', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner', 'format_adapter'];
-  const maxTokens = longOutputAgents.includes(agentId) ? 8192 : (needsLongOutput ? 8192 : 4096);
+  // ⚠️ DashScope qwen-long max_tokens上限6000, qwen-max上限8192
+  // DeepSeek所有模型max_tokens上限都是8192
+  const longOutputAgents = ['storyboard', 'storyboard_csv', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner', 'format_adapter', 'aggregate', 'story_breakdown_pack', 'asset_extractor', 'asset_extractor_repair'];
+  const model = resolveOpenAICompatibleModel(provider, providerId, agentId, options, useReasoner, longOutputAgents);
+
+  let maxTokens = longOutputAgents.includes(agentId) ? 8192 : (needsLongOutput ? 8192 : 4096);
+  // dashscope qwen-turbo/qwen-plus max_tokens上限8192
+  if (providerId === 'dashscope') {
+    maxTokens = Math.min(maxTokens, 8192);
+  }
   
   console.log(`Calling ${provider.name} (${agentId || 'unknown'}) model: ${model}, max_tokens: ${maxTokens}`);
   
@@ -860,8 +1695,21 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
   
   // 🔧 添加超时控制（Render免费版30秒限制，设25秒以便返回错误）
   const controller = new AbortController();
-  // character generation often needs more time; keep within Render limits
-  const timeoutId = setTimeout(() => controller.abort(), (useReasoner || agentId === 'character') ? 120000 : 25000);
+  // 长输出agent需要更多时间（aggregate每批~6750 tokens，约120-150秒）
+  const needsLongTimeout = useReasoner || [
+    'character',
+    'aggregate',
+    'story_breakdown_pack',
+    'screenwriter',
+    'novelist',
+    'storyboard',
+    'storyboard_csv',
+    'asset_extractor',
+    'asset_extractor_repair'
+  ].includes(agentId);
+  const timeoutMs = needsLongTimeout ? 180000 : 25000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const generationSettings = resolveGenerationSettings(agentId, options, providerId);
   
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -870,12 +1718,13 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
-        ...(currentProvider === 'openrouter' ? { 'HTTP-Referer': 'https://fizzdragon.com' } : {})
+        ...(providerId === 'openrouter' ? { 'HTTP-Referer': 'https://fizzdragon.com' } : {})
       },
       body: JSON.stringify({
         model: model,
         max_tokens: maxTokens,
         stream: false,  // 暂时关闭流式，后续可开启
+        ...generationSettings,
         messages: [
           { role: 'system', content: cleanSystem },
           { role: 'user', content: cleanUser }
@@ -907,13 +1756,15 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
     return {
       text: text.trim(),
       tokens: { input: inputTokens, output: outputTokens },
-      reasoning: reasoning  // 返回思考过程供前端显示
+      reasoning: reasoning,  // 返回思考过程供前端显示
+      provider: providerId
     };
   } catch (err) {
     clearTimeout(timeoutId);  // 确保清除超时
     if (err.name === 'AbortError') {
-      console.error(`${provider.name} API timeout (${useReasoner ? '120s' : '25s'})`);
-      throw new Error(`請求超時（${useReasoner ? '120' : '25'}秒），請重試或縮短內容`);
+      const timeoutSeconds = Math.round(timeoutMs / 1000);
+      console.error(`${provider.name} API timeout (${timeoutSeconds}s)`);
+      throw new Error(`請求超時（${timeoutSeconds}秒），請重試或縮短內容`);
     }
     console.error(`${provider.name} API error:`, err.message);
     throw err;
@@ -921,20 +1772,23 @@ async function callOpenAICompatibleCore(systemPrompt, userMessage, agentId = '',
 }
 
 // ========== Anthropic Claude API调用 ==========
-async function callAnthropicAPI(systemPrompt, userMessage, agentId = '') {
+async function callAnthropicAPI(systemPrompt, userMessage, agentId = '', options = {}) {
+  if (!anthropic) {
+    throw new Error('ANTHROPIC_API_KEY 未配置，无法使用 Anthropic provider。请在 .env 中设置 ANTHROPIC_API_KEY 或切换 AI_PROVIDER。');
+  }
   const needsLongOutput = ['storyboard', 'narrative', 'chapters', 'concept', 'screenwriter', 'character'].includes(agentId);
   let model = 'claude-3-haiku-20240307';
   let maxTokens = 4096;
-  
+
   if (needsLongOutput) {
     model = 'claude-sonnet-4-20250514';
     maxTokens = 16000;
   }
-  
+
   console.log(`Calling Anthropic (${agentId || 'unknown'}) model: ${model}`);
-  
+
   try {
-    const response = await anthropic.messages.create({
+    const createParams = {
       model: model,
       max_tokens: maxTokens,
       system: systemPrompt,
@@ -943,22 +1797,44 @@ async function callAnthropicAPI(systemPrompt, userMessage, agentId = '') {
           ? '\n\n**重要：直接输出纯JSON，不要用```包裹，不要任何解释文字，不要输出思考过程。只输出{开头}结尾的JSON。**'
           : '\n\n**重要：只输出最终正文（自然语言），不要JSON，不要代码块，不要解释/思考过程；输出语言必须跟随输入语言。**') }
       ]
-    });
-    
-    const text = response.content[0]?.text || '';
+    };
+
+    // Extended thinking support
+    if (options.enableThinking) {
+      createParams.thinking = { type: 'enabled', budget_tokens: options.thinkingBudget || 10000 };
+    }
+
+    const response = await anthropic.messages.create(createParams);
+
+    // Parse response — may contain thinking blocks when extended thinking is enabled
+    let text = '';
+    let reasoning = null;
+    for (const block of response.content) {
+      if (block.type === 'thinking') {
+        reasoning = (reasoning || '') + block.thinking;
+      } else if (block.type === 'text') {
+        text += block.text;
+      }
+    }
+    if (!text && response.content[0]?.text) {
+      text = response.content[0].text;
+    }
+
     const inputTokens = response.usage?.input_tokens || 0;
     const outputTokens = response.usage?.output_tokens || 0;
-    
+
     const pricing = PROVIDERS.anthropic.pricing;
     totalTokens.input += inputTokens;
     totalTokens.output += outputTokens;
     totalTokens.cost += inputTokens * pricing.input + outputTokens * pricing.output;
-    
+
     console.log(`Tokens: in=${inputTokens}, out=${outputTokens}`);
-    
+
     return {
       text: text.trim(),
-      tokens: { input: inputTokens, output: outputTokens }
+      tokens: { input: inputTokens, output: outputTokens },
+      reasoning,
+      provider: 'anthropic'
     };
   } catch (err) {
     console.error('Anthropic API error:', err.message);
@@ -1017,7 +1893,8 @@ async function callGeminiAPI(systemPrompt, userMessage, agentId = '') {
     
     return {
       text: text.trim(),
-      tokens: { input: inputTokens, output: outputTokens }
+      tokens: { input: inputTokens, output: outputTokens },
+      provider: 'gemini'
     };
   } catch (err) {
     console.error('Gemini API error:', err.message);
@@ -1027,18 +1904,172 @@ async function callGeminiAPI(systemPrompt, userMessage, agentId = '') {
 
 // ========== 统一调用入口 ==========
 async function callClaudeInternal(systemPrompt, userMessage, agentId = '', options = {}) {
-  if (currentProvider === 'anthropic') {
-    return callAnthropicAPI(systemPrompt, userMessage, agentId);
-  } else if (currentProvider === 'gemini') {
+  const providerId = options.provider && PROVIDERS[options.provider]
+    ? options.provider
+    : currentProvider;
+
+  if (providerId === 'anthropic') {
+    return callAnthropicAPI(systemPrompt, userMessage, agentId, options);
+  } else if (providerId === 'gemini') {
     return callGeminiAPI(systemPrompt, userMessage, agentId);
   } else {
     // 🛡️ Bug#5修复: 使用带重试+备份的调用
-    return callWithFallback(systemPrompt, userMessage, agentId, options);
+    return callWithFallback(systemPrompt, userMessage, agentId, {
+      ...options,
+      provider: providerId
+    });
   }
 }
 
 // 兼容旧代码的别名
 const callOpenAICompatible = callWithFallback;
+
+// ========== 流式 LLM 调用（支持所有 provider + 思考过程检测）==========
+async function callClaudeWithStreaming(systemPrompt, userMessage, agentId, options, callbacks) {
+  const { onThinking, onContent, onDone, onError } = callbacks;
+  let fullText = '';
+  let fullThinking = '';
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  try {
+    if (currentProvider === 'anthropic') {
+      if (!anthropic) throw new Error('ANTHROPIC_API_KEY 未配置');
+      // Anthropic streaming with SDK
+      const createParams = {
+        model: options.model || 'claude-sonnet-4-20250514',
+        max_tokens: options.maxTokens || 16000,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMessage }],
+        stream: true
+      };
+      if (options.enableThinking) {
+        createParams.thinking = { type: 'enabled', budget_tokens: options.thinkingBudget || 10000 };
+      }
+
+      const stream = anthropic.messages.stream(createParams);
+
+      stream.on('thinking', (thinking) => {
+        fullThinking += thinking;
+        onThinking?.(thinking);
+      });
+
+      stream.on('text', (text) => {
+        fullText += text;
+        onContent?.(text);
+      });
+
+      const finalMessage = await stream.finalMessage();
+      inputTokens = finalMessage.usage?.input_tokens || 0;
+      outputTokens = finalMessage.usage?.output_tokens || 0;
+
+      // Track tokens
+      const pricing = PROVIDERS.anthropic.pricing;
+      totalTokens.input += inputTokens;
+      totalTokens.output += outputTokens;
+      totalTokens.cost += inputTokens * pricing.input + outputTokens * pricing.output;
+
+    } else {
+      // OpenAI-compatible providers (DeepSeek, OpenRouter, etc.)
+      const provider = PROVIDERS[currentProvider];
+      const apiKey = getApiKeyForProvider(currentProvider);
+      const baseUrl = provider.baseUrl;
+      const detector = new ThinkingStreamDetector();
+
+      const longOutputAgents = ['storyboard', 'storyboard_csv', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner', 'format_adapter', 'aggregate', 'story_breakdown_pack', 'asset_extractor', 'asset_extractor_repair'];
+      const selectedModel = options.model || resolveOpenAICompatibleModel(provider, currentProvider, agentId, options || {}, false, longOutputAgents);
+      const requestedMaxTokens = options.maxTokens || 8192;
+      const maxTokens = currentProvider === 'dashscope'
+        ? Math.min(requestedMaxTokens, 8192)
+        : requestedMaxTokens;
+      console.log(`[Stream] Calling ${provider.name} (${selectedModel}), prompt: ${systemPrompt.length + userMessage.length} chars`);
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          ...(currentProvider === 'openrouter' ? { 'HTTP-Referer': 'https://fizzdragon.com' } : {})
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          max_tokens: maxTokens,
+          stream: true,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage }
+          ]
+        })
+      });
+
+      console.log(`[Stream] ${provider.name} response status: ${response.status}`);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`${provider.name} API error: ${response.status} ${errText}`);
+      }
+
+      console.log(`[Stream] Starting to read ${provider.name} stream...`);
+      await consumeSseResponse(response.body, {
+        onChunk: (chunkCount, value) => {
+          if (chunkCount <= 2) console.log(`[Stream] Chunk #${chunkCount} received, ${value.length} bytes`);
+        },
+        onData: (data) => {
+          if (data === '[DONE]') return;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              throw new Error(`${provider.name} API error: ${parsed.error.code || 'stream_error'} ${parsed.error.message || ''}`.trim());
+            }
+            const delta = parsed.choices?.[0]?.delta;
+
+            const content = delta?.content || '';
+            if (content) {
+              const events = detector.feed(content);
+              for (const evt of events) {
+                if (evt.type === 'thinking') {
+                  fullThinking += evt.text;
+                  onThinking?.(evt.text);
+                } else {
+                  fullText += evt.text;
+                  onContent?.(evt.text);
+                }
+              }
+            }
+
+            if (parsed.usage) {
+              inputTokens = parsed.usage.prompt_tokens || 0;
+              outputTokens = parsed.usage.completion_tokens || 0;
+            }
+          } catch (err) {
+            throw err;
+          }
+        }
+      });
+
+      // Flush detector buffer
+      const remaining = detector.flush();
+      for (const evt of remaining) {
+        if (evt.type === 'thinking') {
+          fullThinking += evt.text;
+          onThinking?.(evt.text);
+        } else {
+          fullText += evt.text;
+          onContent?.(evt.text);
+        }
+      }
+
+      // Track tokens
+      totalTokens.input += inputTokens;
+      totalTokens.output += outputTokens;
+      totalTokens.cost += inputTokens * provider.pricing.input + outputTokens * provider.pricing.output;
+    }
+
+    onDone?.(fullText, fullThinking || null, { input: inputTokens, output: outputTokens });
+    return { text: fullText, reasoning: fullThinking || null, tokens: { input: inputTokens, output: outputTokens } };
+  } catch (err) {
+    onError?.(err);
+    throw err;
+  }
+}
 
 // ========== 流式API（解决Cloudflare 100秒超时）==========
 app.post('/api/agent-stream/:agentId', async (req, res) => {
@@ -1058,7 +2089,7 @@ app.post('/api/agent-stream/:agentId', async (req, res) => {
   
   try {
     const provider = PROVIDERS[currentProvider];
-    const apiKey = process.env[`${currentProvider.toUpperCase()}_API_KEY`];
+    const apiKey = getApiKeyForProvider(currentProvider);
     const baseUrl = provider.baseUrl;
     
     // 构建prompt
@@ -1137,16 +2168,18 @@ app.post('/api/agent/:agentId', async (req, res) => {
   const { agentId } = req.params;
   const { content, context, novel, title, userInput, useReasoner, provider: requestedProvider } = req.body;
   const actualContent = content || novel || userInput || "";
-  const options = { useReasoner: useReasoner === true };
+  const options = {
+    useReasoner: useReasoner === true,
+    ...(requestedProvider && PROVIDERS[requestedProvider]
+      ? { provider: requestedProvider, disableFallback: true }
+      : {})
+  };
 
   // Screenwriter mode (default can be set via env)
   const screenwriterMode = (context?.screenwriterMode || process.env.SCREENWRITER_MODE_DEFAULT || 'legacy').trim();
   
-  // 🆕 支持前端指定provider（临时切换）
-  const originalProvider = currentProvider;
   if (requestedProvider && PROVIDERS[requestedProvider]) {
-    currentProvider = requestedProvider;
-    console.log(`[Provider] 临时切换到 ${requestedProvider}`);
+    console.log(`[Provider] 请求锁定到 ${requestedProvider}`);
   }
   
   const agent = AGENTS[agentId];
@@ -1254,69 +2287,6 @@ ${truncatedContent}`;
 
     // ============ story_breakdown_pack ============
     } else if (agentId === 'story_breakdown_pack') {
-      // Build a deterministic 80-episode source_range index from the provided text
-      const buildSourceRanges = (text, target=80) => {
-        const lines = String(text||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
-        const headRe = /^\s*(Chapter\s+\d+\s*\|.*|CHAPTER\s+\d+\s*\|.*)\s*$/i;
-        const heads = [];
-        for (let i=0;i<lines.length;i++) {
-          if (headRe.test(lines[i])) heads.push({ idx:i, title: lines[i].trim() });
-        }
-        // fallback: if no chapter headings, evenly split by lines
-        const segments = [];
-        if (heads.length === 0) {
-          const per = Math.max(1, Math.floor(lines.length/target));
-          for (let e=0;e<target;e++) {
-            const start = e*per;
-            const end = (e===target-1) ? (lines.length-1) : Math.min(lines.length-1, (e+1)*per-1);
-            segments.push({ startLine:start+1, endLine:end+1, title:`Segment ${e+1}` });
-          }
-          return segments;
-        }
-        // build chapter segments
-        for (let h=0;h<heads.length;h++) {
-          const start = heads[h].idx;
-          const end = (h===heads.length-1) ? (lines.length-1) : (heads[h+1].idx-1);
-          segments.push({ startLine:start+1, endLine:end+1, title: heads[h].title });
-        }
-        // If chapters > target, merge adjacent chapters
-        while (segments.length > target) {
-          // merge the shortest with neighbor
-          let minI = 0;
-          let minLen = Infinity;
-          for (let i=0;i<segments.length;i++) {
-            const len = segments[i].endLine - segments[i].startLine;
-            if (len < minLen) { minLen=len; minI=i; }
-          }
-          const i = minI;
-          const j = (i===0) ? 1 : i-1;
-          const a = segments[Math.min(i,j)];
-          const b = segments[Math.max(i,j)];
-          const merged = {
-            startLine: Math.min(a.startLine,b.startLine),
-            endLine: Math.max(a.endLine,b.endLine),
-            title: (a.title + ' + ' + b.title).slice(0,160)
-          };
-          segments.splice(Math.max(i,j),1);
-          segments.splice(Math.min(i,j),1,merged);
-        }
-        // If chapters < target, split longest segments
-        while (segments.length < target) {
-          let maxI = 0;
-          let maxLen = -1;
-          for (let i=0;i<segments.length;i++) {
-            const len = segments[i].endLine - segments[i].startLine;
-            if (len > maxLen) { maxLen=len; maxI=i; }
-          }
-          const seg = segments[maxI];
-          const mid = Math.floor((seg.startLine + seg.endLine) / 2);
-          const left = { startLine: seg.startLine, endLine: mid, title: seg.title + ' (A)' };
-          const right = { startLine: mid+1, endLine: seg.endLine, title: seg.title + ' (B)' };
-          segments.splice(maxI,1,left,right);
-        }
-        return segments;
-      };
-
       const target = 80;
       const segs = buildSourceRanges(truncatedContent, target);
       const indexLines = segs.map((s,i)=>{
@@ -1336,9 +2306,9 @@ ${truncatedContent}`;
     
     console.log(`[${agent.name}] Done!`);
     
-    // 🧠 解析<thinking>标签中的思考过程
+    // 🧠 只暴露模型正文里的 <thinking>，不回退到 provider reasoning_content
     let finalResult = result.text;
-    let thinkingContent = result.reasoning || null;
+    let thinkingContent = null;
     
     const thinkingMatch = result.text.match(/<thinking>([\s\S]*?)<\/thinking>/);
     if (thinkingMatch) {
@@ -1566,9 +2536,6 @@ ${truncatedContent}`;
       }
     }
 
-    // 🆕 恢复原provider
-    if (requestedProvider) currentProvider = originalProvider;
-    
     res.json({ 
       result: finalResult, 
       agent: agentId,
@@ -1576,13 +2543,10 @@ ${truncatedContent}`;
       skillsUsed: agent.skills,
       tokens: result.tokens,
       totalTokens: totalTokens,
-      reasoning: thinkingContent,  // 思考过程（<thinking>标签或DeepSeek reasoner）
-      provider: requestedProvider || currentProvider  // 🆕 返回使用的provider
+      reasoning: thinkingContent,
+      provider: result.provider || requestedProvider || currentProvider
     });
   } catch (err) {
-    // 🆕 恢复原provider
-    if (requestedProvider) currentProvider = originalProvider;
-    
     console.error(`[${agent.name}] Error:`, err.message);
     // 🔧 确保错误响应也有CORS头
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -1590,6 +2554,589 @@ ${truncatedContent}`;
     res.status(500).json({ error: err.message, agent: agentId });
   }
 });
+
+// ========== Pipeline API (modular) ==========
+import { createPipelineRouter } from './pipeline/index.js';
+import { createOrchestrateHandler } from './pipeline/routes/orchestrate.js';
+import {
+  attachResponseLogging,
+  createRequestLogger,
+  summarizeError,
+  summarizeNormalization,
+  summarizePipelineBody,
+  summarizeTokens
+} from './pipeline/utils/logger.js';
+const pipelineRouter = createPipelineRouter({
+  AGENTS, loadAgentSkills, needsJsonOutput,
+  callClaude, callClaudeWithStreaming,
+  extractThinking, buildSourceRanges,
+  getApiKeyForProvider, sanitizeForJson,
+  _PROVIDERS: PROVIDERS
+});
+app.use('/api/pipeline', pipelineRouter);
+app.use('/api/ai/forward', pipelineRouter);
+
+// ========== Pipeline Stream Routes (registered on main app to avoid Express sub-router SSE buffering) ==========
+import { PIPELINE_AGENT_MAP, PIPELINE_STEPS } from './pipeline/config.js';
+import { buildPipelinePrompt } from './pipeline/services/prompt-builder.js';
+import { normalizePipelineStepOutput } from './pipeline/services/output-normalizer.js';
+import { buildDeterministicBreakdownCsv, shouldUseDeterministicBreakdownFallback } from './pipeline/services/deterministic-breakdown.js';
+import { buildDeterministicCharacterCostume, shouldPreferDeterministicCharacterCostume } from './pipeline/services/deterministic-character-costume.js';
+
+const PIPELINE_THINKING_HINTS = {
+  'extract-bible': '正在抽取世界观、角色关系与核心规则。',
+  breakdown: '正在分析原文结构并拆解剧集节奏。',
+  screenplay: '正在根据当前剧集映射撰写可拍剧本。',
+  storyboard: '正在把剧本拆成镜头级分镜。',
+  'extract-assets': '正在从当前内容中提取角色、场景和道具。',
+  'design-characters': '正在汇总角色设定、服装关系与跨集出场信息。'
+};
+
+function buildExtractAssetsRepairPrompt(body, normalized, deps = {}) {
+  const episodeId = Number.isInteger(body?.episodeIndex)
+    ? `E${String(body.episodeIndex + 1).padStart(3, '0')}`
+    : null;
+  const agentId = 'asset_extractor_repair';
+  const agent = deps?.AGENTS?.[agentId];
+  const skillsContent = agent?.skills && typeof deps?.loadAgentSkills === 'function'
+    ? deps.loadAgentSkills(agent.skills)
+    : '';
+  const systemPrompt = agent
+    ? `${agent.prompt}\n\n---\n## 专业方法论参考（必须运用以下方法分析用户内容）：\n${skillsContent}\n---\n\n**重要：请基于以上方法论修复用户提供的 JSON。只修复 schema、命名、引用与归类问题，不要改写剧情，不要新增设定。**`
+    : '';
+
+  return {
+    systemPrompt,
+    userMessage: `Current task: repair invalid extract-assets JSON.\n\nStrictly follow the currently loaded skills on the repair agent for the 5-library schema, prop extraction, scene extraction, and language-following rules. Only fix schema, naming, references, and scene/prop classification issues. Do not rewrite the story.\n${episodeId ? `Current episode: ${episodeId}\n` : ''}\nCurrent screenplay:\n${body.screenplay || ''}\n\nValidation errors:\n${JSON.stringify(normalized.details?.errors || [], null, 2)}\n\nBroken JSON to repair:\n${normalized.raw || ''}`,
+    agentId
+  };
+}
+
+function buildStoryboardRepairPrompt(body, normalized, deps = {}) {
+  const agentId = 'storyboard_repair';
+  const agent = deps?.AGENTS?.[agentId];
+  const skillsContent = agent?.skills && typeof deps?.loadAgentSkills === 'function'
+    ? deps.loadAgentSkills(agent.skills)
+    : '';
+  const systemPrompt = agent
+    ? `${agent.prompt}\n\n---\n## 专业方法论参考（必须运用以下方法分析用户内容）：\n${skillsContent}\n---\n\n**重要：请基于以上方法论修复用户提供的 CSV。只修复 contract、列级缺失、scene/prop 归类与 canon 复用问题，不要改写剧本。**`
+    : '';
+  const assets = body?.assets || body?.assetLibrary;
+  const assetsText = assets ? `\n\nAvailable assets:\n${typeof assets === 'string' ? assets : JSON.stringify(assets)}` : '';
+
+  return {
+    systemPrompt,
+    userMessage: `Current task: repair invalid storyboard CSV.\n\nStrictly follow the currently loaded storyboard skills and repair rules on the repair agent. Make the minimum necessary fixes only; do not regenerate the whole storyboard.\n\nCurrent screenplay:\n${body.screenplay || ''}${assetsText}\n\nValidation errors:\n${JSON.stringify(normalized.details || {}, null, 2)}\n\nBroken CSV to repair:\n${normalized.raw || ''}`,
+    agentId
+  };
+}
+
+const orchestrateHandler = createOrchestrateHandler({
+  callClaudeWithStreaming,
+  AGENTS,
+  loadAgentSkills,
+  needsJsonOutput,
+  buildSourceRanges,
+  PROVIDERS,
+  getCurrentProvider: () => currentProvider
+});
+
+app.post('/api/pipeline/run', orchestrateHandler);
+app.post('/api/ai/forward/run', orchestrateHandler);
+
+for (const stepId of PIPELINE_STEPS) {
+  const streamHandler = async (req, res) => {
+    const requestLogger = createRequestLogger(req, res, {
+      route: 'pipeline.stream.inline',
+      stepId
+    });
+    const startedAt = attachResponseLogging(req, res, requestLogger);
+
+    requestLogger.info('Pipeline stream request received', {
+      request: summarizePipelineBody(req.body)
+    });
+
+    // Auto-inject project context when projectId is provided
+    if (req.body.projectId) {
+      const userId = '_public';
+      const ctx = readProjectContext(userId, req.body.projectId);
+      const disabledContextKeys = new Set(Array.isArray(req.body.disableContextKeys) ? req.body.disableContextKeys : []);
+      if (ctx) {
+        const injectedKeys = [];
+        for (const [k, v] of Object.entries(ctx)) {
+          if (disabledContextKeys.has(k)) continue;
+          if (req.body[k] === undefined && v != null) {
+            req.body[k] = v;
+            injectedKeys.push(k);
+          }
+        }
+        requestLogger.info('Injected project context', {
+          injectedKeys,
+          disabledContextKeys: Array.from(disabledContextKeys)
+        });
+      }
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.flushHeaders();
+    // Send initial SSE comment to keep connection alive during API call
+    res.write(':ok\n\n');
+
+    const write = (data) => {
+      if (!res.writableEnded) try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {}
+    };
+
+    const writeDeterministicCharacterCostume = (reason) => {
+      const deterministicAssets = buildDeterministicCharacterCostume(req.body);
+      requestLogger.warn('Used deterministic character costume stream fallback', {
+        reason,
+        durationMs: Date.now() - startedAt
+      });
+      write({
+        type: 'thinking',
+        content: reason || '角色设计改为本地确定性生成，避免流式返回无效内容。'
+      });
+      write({
+        type: 'done',
+        fullText: JSON.stringify(deterministicAssets),
+        fullThinking: null,
+        tokens: { input: 0, output: 0 },
+        agent: 'deterministic_character_costume_fallback',
+        provider: 'deterministic-local'
+      });
+    };
+
+    try {
+      const initialThinking = PIPELINE_THINKING_HINTS[stepId];
+      if (initialThinking) {
+        write({ type: 'thinking', content: initialThinking });
+      }
+
+      if (stepId === 'design-characters' && shouldPreferDeterministicCharacterCostume(req.body)) {
+        // DashScope long-form character-costume streaming is known to emit invalid zero chunks here.
+        writeDeterministicCharacterCostume('角色设计改为本地确定性生成，避免长文本流式返回无效内容。');
+        if (!res.writableEnded) res.end();
+        return;
+      }
+
+      const deps = { AGENTS, loadAgentSkills, needsJsonOutput, buildSourceRanges };
+      const { systemPrompt, userMessage, agentId, options = {} } = buildPipelinePrompt(stepId, req.body, deps);
+      requestLogger.info('Dispatching inline pipeline stream call', {
+        agentId,
+        systemPromptLength: systemPrompt.length,
+        userMessageLength: userMessage.length
+      });
+
+      const providerId = req.body.provider && PROVIDERS[req.body.provider]
+        ? req.body.provider
+        : currentProvider;
+      const provider = PROVIDERS[providerId];
+      const apiKey = getApiKeyForProvider(providerId);
+      const baseUrl = provider.baseUrl;
+      const longOutputAgents = ['storyboard', 'storyboard_csv', 'novelist', 'screenwriter', 'narrative', 'story_architect', 'episode_planner', 'aggregate', 'story_breakdown_pack', 'asset_extractor', 'asset_extractor_repair'];
+      const model = resolveOpenAICompatibleModel(provider, providerId, agentId, options, false, longOutputAgents);
+      const generationSettings = resolveGenerationSettings(agentId, options, providerId);
+      let thinkingStarted = false;
+      let contentStarted = false;
+
+      requestLogger.info('Resolved stream provider configuration', {
+        agentId,
+        providerId,
+        providerName: provider.name,
+        model,
+        baseUrl,
+        hasApiKey: Boolean(apiKey),
+        generationSettings
+      });
+
+      const apiResp = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model, max_tokens: 8192, stream: true,
+          ...generationSettings,
+          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]
+        })
+      });
+
+      if (!apiResp.ok) {
+        const errText = await apiResp.text().catch(() => '');
+        throw new Error(`${provider.name} API error: ${apiResp.status} ${errText}`);
+      }
+      requestLogger.info('Provider stream endpoint responded', {
+        providerId,
+        providerName: provider.name,
+        model,
+        statusCode: apiResp.status
+      });
+
+      const detector = new ThinkingStreamDetector();
+      let fullText = '', fullThinking = '', inputTokens = 0, outputTokens = 0;
+      await consumeSseResponse(apiResp.body, {
+        onData: (data) => {
+          if (data === '[DONE]') return;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              throw new Error(`${provider.name} API error: ${parsed.error.code || 'stream_error'} ${parsed.error.message || ''}`.trim());
+            }
+            const delta = parsed.choices?.[0]?.delta;
+            if (delta?.content) {
+              const events = detector.feed(delta.content);
+              for (const event of events) {
+                if (event.type === 'thinking') {
+                  fullThinking += event.text;
+                  if (!thinkingStarted) {
+                    thinkingStarted = true;
+                    requestLogger.info('Thinking stream started', {
+                      providerId,
+                      model,
+                      firstChunkLength: event.text.length
+                    });
+                  }
+                  write({ type: 'thinking', content: event.text });
+                } else {
+                  fullText += event.text;
+                  if (!contentStarted) {
+                    contentStarted = true;
+                    requestLogger.info('Content stream started', {
+                      providerId,
+                      model,
+                      firstChunkLength: event.text.length
+                    });
+                  }
+                  write({ type: 'chunk', content: event.text });
+                }
+              }
+            }
+            if (parsed.usage) {
+              inputTokens = parsed.usage.prompt_tokens || 0;
+              outputTokens = parsed.usage.completion_tokens || 0;
+            }
+          } catch (err) {
+            throw err;
+          }
+        }
+      });
+      for (const event of detector.flush()) {
+        if (event.type === 'thinking') {
+          fullThinking += event.text;
+          write({ type: 'thinking', content: event.text });
+        } else {
+          fullText += event.text;
+          write({ type: 'chunk', content: event.text });
+        }
+      }
+      let normalized = normalizePipelineStepOutput(stepId, fullText, req.body);
+      if (normalized.error) {
+        if (stepId === 'extract-assets') {
+          requestLogger.warn('Extract-assets normalization failed; invoking repair agent', {
+            normalization: summarizeNormalization(normalized)
+          });
+          try {
+            const repairPrompt = buildExtractAssetsRepairPrompt(req.body, normalized, { AGENTS, loadAgentSkills });
+            const repairResult = await callClaude(
+              repairPrompt.systemPrompt,
+              repairPrompt.userMessage,
+              repairPrompt.agentId,
+              { provider: providerId, disableFallback: true }
+            );
+            const { content: repairedContent } = extractThinking(repairResult.text || '');
+            normalized = normalizePipelineStepOutput(stepId, sanitizeForJson(repairedContent), req.body);
+            if (!normalized.error) {
+              inputTokens += repairResult.tokens?.input || 0;
+              outputTokens += repairResult.tokens?.output || 0;
+            }
+          } catch (repairError) {
+            requestLogger.warn('Extract-assets repair attempt failed', {
+              error: summarizeError(repairError)
+            });
+          }
+        }
+        if (stepId === 'storyboard' && normalized.error === 'storyboard_csv_malformed') {
+          requestLogger.warn('Storyboard normalization failed; invoking repair agent', {
+            normalization: summarizeNormalization(normalized)
+          });
+          try {
+            const repairPrompt = buildStoryboardRepairPrompt(req.body, normalized, { AGENTS, loadAgentSkills });
+            const repairResult = await callClaude(
+              repairPrompt.systemPrompt,
+              repairPrompt.userMessage,
+              repairPrompt.agentId,
+              { provider: providerId, disableFallback: true }
+            );
+            const { content: repairedContent } = extractThinking(repairResult.text || '');
+            normalized = normalizePipelineStepOutput(stepId, sanitizeForJson(repairedContent), req.body);
+            if (!normalized.error) {
+              inputTokens += repairResult.tokens?.input || 0;
+              outputTokens += repairResult.tokens?.output || 0;
+            }
+          } catch (repairError) {
+            requestLogger.warn('Storyboard repair attempt failed', {
+              error: summarizeError(repairError)
+            });
+          }
+        }
+      }
+      if (normalized.error) {
+        if (stepId === 'design-characters') {
+          writeDeterministicCharacterCostume('角色设计模型结果解析失败，已自动切换为本地确定性生成。');
+          if (!res.writableEnded) res.end();
+          return;
+        }
+        requestLogger.warn('Inline stream normalization failed', {
+          providerId,
+          model,
+          tokens: summarizeTokens({ input: inputTokens, output: outputTokens }),
+          normalization: summarizeNormalization(normalized),
+          durationMs: Date.now() - startedAt
+        });
+        write({ type: 'error', error: normalized.error, details: normalized.details, raw: normalized.raw });
+        if (!res.writableEnded) res.end();
+        return;
+      }
+      fullText = normalized.result;
+      requestLogger.info('Inline stream completed', {
+        providerId,
+        providerName: provider.name,
+        model,
+        tokens: summarizeTokens({ input: inputTokens, output: outputTokens }),
+        normalization: summarizeNormalization(normalized),
+        durationMs: Date.now() - startedAt
+      });
+      write({ type: 'done', fullText, fullThinking: fullThinking || null, tokens: { input: inputTokens, output: outputTokens } });
+
+      // Write back generated screenplay to project-context for cross-episode continuity
+      if (stepId === 'screenplay' && req.body.projectId && req.body.episodeIndex != null && fullText) {
+        const epIdx = req.body.episodeIndex;
+        writeProjectContext('_public', req.body.projectId, {
+          screenplays: { [epIdx]: fullText }
+        })
+          .then(() => {
+            requestLogger.info('Screenplay written back to project context', {
+              episodeIndex: epIdx
+            });
+          })
+          .catch((err) => {
+            requestLogger.error('Screenplay context writeback failed', {
+              episodeIndex: epIdx,
+              error: summarizeError(err)
+            });
+          });
+      }
+      } catch (err) {
+        if (stepId === 'breakdown' && shouldUseDeterministicBreakdownFallback(err)) {
+          try {
+            const fallbackCsv = buildDeterministicBreakdownCsv(req.body, { buildSourceRanges });
+            write({
+              type: 'done',
+              fullText: fallbackCsv,
+              fullThinking: null,
+              tokens: { input: 0, output: 0 },
+              agent: 'deterministic_breakdown_fallback',
+              provider: 'deterministic-local'
+            });
+            requestLogger.warn('Used deterministic breakdown stream fallback', {
+              error: summarizeError(err),
+              durationMs: Date.now() - startedAt
+            });
+            if (!res.writableEnded) res.end();
+            return;
+          } catch (fallbackErr) {
+            requestLogger.error('Deterministic breakdown stream fallback failed', {
+              error: summarizeError(fallbackErr),
+              durationMs: Date.now() - startedAt
+            });
+          }
+        }
+
+        requestLogger.error('Pipeline inline stream request failed', {
+          error: summarizeError(err),
+          request: summarizePipelineBody(req.body),
+          durationMs: Date.now() - startedAt
+        });
+        write({ type: 'error', error: err.message });
+      }
+    if (!res.writableEnded) res.end();
+  };
+
+  app.post(`/api/pipeline/${stepId}/stream`, streamHandler);
+  app.post(`/api/ai/forward/${stepId}/stream`, streamHandler);
+}
+
+const registerContextEditStreamRoute = (path) => {
+  app.post(path, async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.flushHeaders();
+    res.write(':ok\n\n');
+
+    const write = (data) => {
+      if (!res.writableEnded) {
+        try {
+          res.write(`data: ${JSON.stringify(data)}\n\n`);
+        } catch {}
+      }
+    };
+
+    const { projectId, instruction } = req.body || {};
+    if (!projectId || !instruction) {
+      write({ type: 'error', error: 'Missing required fields: projectId, instruction' });
+      if (!res.writableEnded) res.end();
+      return;
+    }
+
+    const currentContext = readProjectContext('_public', projectId);
+    if (!currentContext || Object.keys(currentContext).length === 0) {
+      write({ type: 'error', error: 'Project context is empty. Run extract/breakdown first.' });
+      if (!res.writableEnded) res.end();
+      return;
+    }
+
+    const { systemPrompt, userMessage } = buildContextEditPrompts(instruction, currentContext);
+    console.log(`[ContextEdit] Request received for ${projectId}, prompt=${systemPrompt.length}+${userMessage.length} chars`);
+
+    try {
+      const providerId = req.body.provider && PROVIDERS[req.body.provider]
+        ? req.body.provider
+        : currentProvider;
+
+      let fullText = '';
+      let fullThinking = '';
+      let tokens = { input: 0, output: 0 };
+
+      if (providerId === 'anthropic' && anthropic) {
+        const stream = anthropic.messages.stream({
+          model: PROVIDERS.anthropic.models.standard,
+          max_tokens: 8192,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userMessage }],
+          stream: true
+        });
+
+        stream.on('thinking', (thinking) => {
+          fullThinking += thinking;
+          write({ type: 'thinking', content: thinking });
+        });
+        stream.on('text', (text) => {
+          fullText += text;
+          write({ type: 'chunk', content: text });
+        });
+
+        const finalMessage = await stream.finalMessage();
+        tokens = {
+          input: finalMessage.usage?.input_tokens || 0,
+          output: finalMessage.usage?.output_tokens || 0
+        };
+      } else {
+        const provider = PROVIDERS[providerId];
+        if (!provider?.baseUrl) {
+          throw new Error(`Provider ${providerId} does not support OpenAI-compatible streaming`);
+        }
+
+        const apiKey = getApiKeyForProvider(providerId);
+        const model = provider.models.best || provider.models.standard;
+
+        const apiResp = await fetch(`${provider.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            ...(providerId === 'openrouter' ? { 'HTTP-Referer': 'https://fizzdragon.com' } : {})
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 8192,
+            stream: true,
+            temperature: 0.2,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userMessage }
+            ]
+          })
+        });
+
+        if (!apiResp.ok) {
+          const errText = await apiResp.text().catch(() => '');
+          throw new Error(`${provider.name} API error: ${apiResp.status} ${errText}`);
+        }
+
+        const reader = apiResp.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const lines = decoder.decode(value).split('\n').filter(line => line.startsWith('data: '));
+          for (const line of lines) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              const delta = parsed.choices?.[0]?.delta;
+
+              if (delta?.content) {
+                fullText += delta.content;
+                write({ type: 'chunk', content: delta.content });
+              }
+
+              if (parsed.usage) {
+                tokens = {
+                  input: parsed.usage.prompt_tokens || 0,
+                  output: parsed.usage.completion_tokens || 0
+                };
+              }
+            } catch {}
+          }
+        }
+      }
+
+      const parsedResult = safeJSONParse(extractJsonTextPayload(fullText), 'context_edit');
+      const rawPatch = parsedResult?.patch && typeof parsedResult.patch === 'object'
+        ? parsedResult.patch
+        : parsedResult;
+      const patch = pickContextPatchKeys(rawPatch);
+      const updatedKeys = Object.keys(patch);
+
+      if (!updatedKeys.length) {
+        throw new Error('AI did not return any writable context keys');
+      }
+
+      await writeProjectContext('_public', projectId, patch);
+
+      const responsePayload = {
+        summary: typeof parsedResult?.summary === 'string' && parsedResult.summary.trim()
+          ? parsedResult.summary.trim()
+          : `已更新项目上下文：${updatedKeys.join('、')}`,
+        updatedKeys,
+        patch
+      };
+
+      console.log(`[ContextEdit] Saved ${projectId}, keys=${updatedKeys.join(',')}`);
+      write({
+        type: 'done',
+        fullText: JSON.stringify(responsePayload),
+        fullThinking: fullThinking || null,
+        tokens
+      });
+    } catch (err) {
+      console.error('[ContextEdit] Error:', err.message);
+      write({ type: 'error', error: err.message });
+    }
+
+    if (!res.writableEnded) res.end();
+  });
+};
+
+registerContextEditStreamRoute('/api/ai/forward/context-edit/stream');
+registerContextEditStreamRoute('/api/pipeline/context-edit/stream');
 
 // 动态配置API（必须在/:legacy之前）
 app.post('/api/config', (req, res) => {
@@ -1611,6 +3158,80 @@ app.get('/api/config', (req, res) => {
   res.json(runtimeConfig);
 });
 
+app.post('/api/fizzstudio/shot/queryPage', async (req, res) => {
+  try {
+    const queryPage = await forwardFizzdragonJson(
+      req,
+      `${FIZZDRAGON_STUDIO_BASE_URL}/api/user/shot/queryPage`,
+      req.body || {}
+    );
+
+    if (!queryPage.ok) {
+      return res.status(queryPage.status).json(queryPage.payload);
+    }
+
+    const hydratedPayload = await hydrateMissingShotRichText(req, queryPage.payload);
+    return res.status(queryPage.status).json(hydratedPayload);
+  } catch (error) {
+    console.error('[fizzstudio/queryShotList] proxy failed:', error);
+    return res.status(502).json({
+      code: 502,
+      message: 'Failed to query storyboard shots from upstream service',
+      error: error?.message || String(error),
+    });
+  }
+});
+
+app.post('/api/fizzstudio/ai/save/storyboard', async (req, res) => {
+  try {
+    const result = await forwardStoryboardSaveWithRetry(req, req.body || {});
+    return res.status(result.upstream?.status || 200).json(result.upstream?.payload || null);
+  } catch (error) {
+    console.error('[fizzstudio/saveStoryboard] proxy failed:', error);
+    return res.status(502).json({
+      code: 502,
+      success: false,
+      message: 'Failed to save storyboard through local proxy',
+      error: error?.message || String(error)
+    });
+  }
+});
+
+app.post('/api/fizzstudio/shotValue/input', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const upstream = await forwardFizzdragonJson(
+      req,
+      `${FIZZDRAGON_STUDIO_BASE_URL}/api/user/shotValue/input`,
+      {
+        shotId: payload.shotId,
+        shotColumnId: payload.shotColumnId,
+        value: payload.value || '',
+        values: payload.values
+      }
+    );
+
+    if (payload.presetColumnKey === 'scene') {
+      persistLocalSceneShadow(payload);
+      return res.status(200).json({
+        success: true,
+        code: 'SUCCESS',
+        message: '成功',
+        data: upstream?.payload?.data || null
+      });
+    }
+
+    return res.status(upstream.status).json(upstream.payload);
+  } catch (error) {
+    console.error('[fizzstudio/inputShotValue] proxy failed:', error);
+    return res.status(502).json({
+      code: 502,
+      message: 'Failed to write storyboard shot value through local proxy',
+      error: error?.message || String(error),
+    });
+  }
+});
+
 // 兼容旧API
 const LEGACY_MAP = {
   interview: 'interview', concept: 'concept', chapters: 'narrative',
@@ -1620,7 +3241,7 @@ const LEGACY_MAP = {
 
 app.post('/api/:legacy', async (req, res, next) => {
   // 跳过特殊路由（交给后续handler处理）
-  const specialRoutes = ['stream', 'config', 'tokens', 'agents', 'providers'];
+  const specialRoutes = ['stream', 'config', 'tokens', 'agents', 'providers', 'pipeline'];
   if (specialRoutes.includes(req.params.legacy)) {
     return next('route');
   }
@@ -1945,6 +3566,9 @@ ${needsJsonOutput(agentId) ? `**输出格式要求（JSON Agents）：**\n- 直�
       }
     }
     
+    const extracted = extractThinking(finalText);
+    finalText = extracted.content || finalText;
+
     console.log(`[${agent.name}] Done!`);
     res.json({ 
       result: finalText, 
@@ -1952,7 +3576,7 @@ ${needsJsonOutput(agentId) ? `**输出格式要求（JSON Agents）：**\n- 直�
       skillsUsed: agent.skills, 
       tokens: result.tokens, 
       totalTokens,
-      reasoning: result.reasoning  // 思考过程（如果有）
+      reasoning: extracted.thinking || null
     });
   } catch (err) {
     console.error(`[${agent.name}] Error:`, err.message);
@@ -1995,13 +3619,7 @@ app.get(['/health', '/api/health'], async (req, res) => {
     },
     provider: currentProvider,
     providerName: provider?.name || currentProvider,
-    hasApiKey: currentProvider === 'anthropic' 
-      ? !!process.env.ANTHROPIC_API_KEY
-      : currentProvider === 'deepseek'
-        ? !!process.env.DEEPSEEK_API_KEY
-        : currentProvider === 'gemini'
-          ? !!process.env.GEMINI_API_KEY
-          : !!process.env.OPENROUTER_API_KEY,
+    hasApiKey: !!getApiKeyForProvider(currentProvider),
     availableProviders: Object.keys(PROVIDERS),
     stats: STATS,
     tokenUsage: totalTokens,
@@ -2022,13 +3640,7 @@ app.get('/api/providers', (req, res) => {
       id,
       name: p.name,
       pricing: p.pricing,
-      hasKey: id === 'anthropic' 
-        ? !!process.env.ANTHROPIC_API_KEY
-        : id === 'deepseek'
-          ? !!process.env.DEEPSEEK_API_KEY
-          : id === 'gemini'
-            ? !!process.env.GEMINI_API_KEY
-            : !!process.env.OPENROUTER_API_KEY
+      hasKey: !!getApiKeyForProvider(id)
     }))
   });
 });
@@ -2048,11 +3660,9 @@ app.post('/api/stream', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   
   const provider = PROVIDERS[currentProvider];
-  const apiKey = currentProvider === 'deepseek' 
-    ? process.env.DEEPSEEK_API_KEY
-    : process.env.ANTHROPIC_API_KEY;
-  const baseUrl = provider?.baseUrl || 'https://api.deepseek.com/v1';
-  const model = provider?.models?.best || 'deepseek-chat';
+  const apiKey = getApiKeyForProvider(currentProvider);
+  const baseUrl = provider?.baseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+  const model = provider?.models?.best || 'qwen-max';
   
   console.log(`[Stream] Starting stream with ${provider?.name}, model: ${model}`);
   
@@ -2065,7 +3675,7 @@ app.post('/api/stream', async (req, res) => {
       },
       body: JSON.stringify({
         model: model,
-        max_tokens: 64000,
+        max_tokens: currentProvider === 'dashscope' ? 8192 : 64000,
         stream: true,
         messages: [
           { role: 'system', content: systemPrompt || '你是一位專業的小說作家。' },
@@ -2361,13 +3971,22 @@ app.post('/api/novel/structure', async (req, res) => {
 
 // 2. 分段處理長篇小說
 app.post('/api/novel/chunk', async (req, res) => {
-  const { novel, chunkIndex, chunkSize = 8000, totalChunks, context, agentId = 'interview' } = req.body;
-  
-  if (!novel) return res.status(400).json({ error: '缺少小說內容' });
-  
-  const start = chunkIndex * chunkSize;
-  const end = Math.min(start + chunkSize, novel.length);
-  const chunk = novel.substring(start, end);
+  const { novel, chunkText, chunkIndex, chunkSize = 8000, totalChunks, context, agentId = 'interview' } = req.body;
+
+  // 支持前端预切片 (chunkText) 或后端切片 (novel)
+  let chunk;
+  let start, end;
+  if (chunkText) {
+    chunk = chunkText;
+    start = chunkIndex * chunkSize;
+    end = start + chunkText.length;
+  } else if (novel) {
+    start = chunkIndex * chunkSize;
+    end = Math.min(start + chunkSize, novel.length);
+    chunk = novel.substring(start, end);
+  } else {
+    return res.status(400).json({ error: '缺少小說內容 (novel 或 chunkText)' });
+  }
   
   console.log(`[📚 長篇處理] 處理第 ${chunkIndex + 1}/${totalChunks} 段 (${start}-${end})`);
   
@@ -2385,8 +4004,7 @@ ${skillsContent}
 - 前文摘要：${context?.previousSummary || '這是開頭'}
 - 當前位置：第 ${start}-${end} 字
 - 請分析這一段的內容，提取關鍵信息
-
-直接輸出JSON。`;
+- 嚴格按照上方指定的輸出格式（CSV 或 JSON）直接輸出，不要加任何解釋`;
 
   try {
     const result = await callClaude(systemPrompt, chunk, agentId);
@@ -2403,43 +4021,344 @@ ${skillsContent}
 
 // 3. 聚合分段結果
 app.post('/api/novel/aggregate', async (req, res) => {
-  const { chunks, targetEpisodes, title } = req.body;
+  const { chunks, targetEpisodes, title, novelText, chunkSize = 100000 } = req.body;
   
   if (!chunks || !chunks.length) return res.status(400).json({ error: '缺少分段數據' });
   
-  console.log(`[📚 長篇處理] 聚合 ${chunks.length} 段結果 → ${targetEpisodes} 集`);
-  
-  const systemPrompt = `你是番劇策劃專家。根據分段分析結果，規劃完整的集數大綱。
+  const totalEpisodes = Math.max(1, Number(targetEpisodes) || 80);
+  const segments = buildSourceRanges(novelText || '', totalEpisodes);
 
-## 要求
-- 目標集數：${targetEpisodes}集
-- 每集3-8分鐘
-- 包含起承轉合節奏
-- 每集有明確的戲劇鉤子
-
-輸出JSON：
-{
-  "title": "${title || '未命名'}",
-  "totalEpisodes": ${targetEpisodes},
-  "episodes": [
-    {
-      "ep": 1,
-      "title": "第1集標題",
-      "summary": "劇情摘要",
-      "scenes": ["場景1", "場景2"],
-      "hook": "本集鉤子",
-      "phase": "起/承/轉/合"
-    },
-    ...
-  ]
-}`;
+  console.log(`[📚 長篇處理] 聚合 ${chunks.length} 段結果 → ${totalEpisodes} 集`);
 
   try {
-    const chunksStr = chunks.map((c, i) => `[段落${i+1}]:\n${c}`).join('\n\n');
-    const result = await callClaude(systemPrompt, chunksStr.substring(0, 15000), 'aggregate');
-    res.json({ result: result.text });
+    // --- 分批调用模型 (primary path) ---
+    // DeepSeek max_tokens=8192，每行CSV约250 tokens，27集≈6750 tokens，安全在限内
+    const BATCH_SIZE = 27;
+    const batchCount = Math.ceil(totalEpisodes / BATCH_SIZE);
+    const chunksStr = chunks.map((chunk, index) => `[段落${index + 1}]\n${chunk}`).join('\n\n');
+    // 每批限制 chunk 文本长度（留足空间给 system prompt + source index）
+    const maxChunkTextPerBatch = 16000;
+
+    const batchPromises = [];
+    for (let b = 0; b < batchCount; b++) {
+      const batchStart = b * BATCH_SIZE;              // 0-indexed
+      const batchEnd = Math.min(totalEpisodes, (b + 1) * BATCH_SIZE);
+      const batchEpStart = `E${String(batchStart + 1).padStart(3, '0')}`;
+      const batchEpEnd = `E${String(batchEnd).padStart(3, '0')}`;
+      const batchSegments = segments.slice(batchStart, batchEnd);
+      const batchSourceIndex = batchSegments.map((seg, i) => {
+        const epId = `E${String(batchStart + i + 1).padStart(3, '0')}`;
+        return `${epId},${seg.startLine}-${seg.endLine},${(seg.title || '').replace(/,/g, ' ')}`;
+      }).join('\n');
+
+      const batchSystemPrompt = `你是番劇策劃專家。根據分段分析結果，規劃第 ${batchEpStart}-${batchEpEnd} 集的大綱。
+
+## 思考過程
+先在 <thinking>...</thinking> 標籤內簡要分析（200字以內）：本批次覆蓋的原文段落核心內容、如何切分為合理的劇集單元。然後直接輸出 CSV。
+
+## 要求
+- 本批次輸出 ${batchEnd - batchStart} 集（${batchEpStart}-${batchEpEnd}）
+- source_range 只能使用我提供的 SOURCE RANGE INDEX 中的行號，禁止自行改寫
+- arc_block 按故事弧段劃分（如 A1、A2、B1、B2、C1 等）
+- 輸出必須是 CSV 純文本，不要 Markdown、不要 JSON、不要解釋
+
+## CSV表頭（必須一字不差）
+${BREAKDOWN_MODEL_HEADER}
+
+## CSV規則
+- 必須輸出 ${batchEnd - batchStart} 行（${batchEpStart}-${batchEpEnd}）
+- 每行 3 欄都要填滿，禁止空欄
+- source_range 必須逐行對應 SOURCE RANGE INDEX
+- arc_block 相鄰集數如屬同一故事弧段，使用相同標記
+- 語言跟隨原文語言`;
+
+      const batchUserMessage = `TITLE: ${title || '未命名'}
+
+SOURCE RANGE INDEX for ${batchEpStart}-${batchEpEnd} (ep_id,source_range,segment_title)
+${batchSourceIndex}
+
+CHUNK ANALYSES
+${chunksStr.substring(0, maxChunkTextPerBatch)}`;
+
+      console.log(`[📚 聚合] 發起 batch ${b + 1}/${batchCount}: ${batchEpStart}-${batchEpEnd} (${batchEnd - batchStart} 集)`);
+      batchPromises.push(
+        callClaude(batchSystemPrompt, batchUserMessage, 'aggregate')
+          .then(result => {
+            const csv = extractBreakdownCsv(result.text, batchEnd - batchStart);
+            if (csv) return csv;
+            // 模型可能返回 JSON，尝试转换
+            const payload = extractJsonPayload(result.text);
+            if (payload) return buildAggregateCsvFromJson(payload, batchSegments, batchEnd - batchStart);
+            return null;
+          })
+          .catch(err => {
+            console.error(`[📚 聚合] batch ${b + 1} 失敗:`, err.message);
+            return null;
+          })
+      );
+    }
+
+    const batchResults = await Promise.all(batchPromises);
+    console.log(`[📚 聚合] 批次結果: ${batchResults.map((r, i) => `batch${i + 1}=${r ? '成功' : '失敗'}`).join(', ')}`);
+
+    // --- 合并批次 CSV ---
+    const mergedRows = [BREAKDOWN_CSV_HEADER];
+    const coveredEpisodes = new Set();
+
+    for (const batchCsv of batchResults) {
+      if (!batchCsv) continue;
+      const lines = batchCsv.split('\n');
+      for (const line of lines) {
+        if (line === BREAKDOWN_CSV_HEADER || line === BREAKDOWN_MODEL_HEADER) continue;
+        const epMatch = line.match(/^(E\d{3})/);
+        if (epMatch && !coveredEpisodes.has(epMatch[1])) {
+          coveredEpisodes.add(epMatch[1]);
+          mergedRows.push(line);
+        }
+      }
+    }
+
+    console.log(`[📚 聚合] 模型批次合計: ${coveredEpisodes.size}/${totalEpisodes} 集`);
+
+    // --- 补齐缺失集数 (deterministic fallback) ---
+    if (coveredEpisodes.size < totalEpisodes) {
+      console.log(`[📚 聚合] 缺少 ${totalEpisodes - coveredEpisodes.size} 集，用 deterministic merge 补齐`);
+      const fallbackCsv = buildAggregateCsvFromChunkResults(chunks, segments, novelText || '', Number(chunkSize) || 100000);
+      if (fallbackCsv) {
+        const fallbackLines = fallbackCsv.split('\n');
+        for (const line of fallbackLines) {
+          if (line === BREAKDOWN_CSV_HEADER || line === BREAKDOWN_MODEL_HEADER) continue;
+          const epMatch = line.match(/^(E\d{3})/);
+          if (epMatch && !coveredEpisodes.has(epMatch[1])) {
+            coveredEpisodes.add(epMatch[1]);
+            mergedRows.push(line);
+          }
+        }
+      }
+    }
+
+    // --- 按 ep_id 排序 ---
+    const header = mergedRows[0];
+    const dataRows = mergedRows.slice(1).sort((a, b) => {
+      const aId = a.match(/^E(\d{3})/);
+      const bId = b.match(/^E(\d{3})/);
+      return (aId ? parseInt(aId[1]) : 0) - (bId ? parseInt(bId[1]) : 0);
+    });
+
+    const finalCsv = [header, ...dataRows].join('\n');
+    const finalRowCount = dataRows.length;
+
+    if (finalRowCount === 0) {
+      return res.status(502).json({
+        error: 'aggregate_empty',
+        message: '聚合結果為空：所有批次均失敗且 deterministic merge 也無法生成'
+      });
+    }
+
+    console.log(`[📚 聚合] 最終 CSV: ${finalRowCount}/${totalEpisodes} 集`);
+    if (finalRowCount < totalEpisodes) {
+      console.warn(`[📚 聚合] ⚠️ 最終只有 ${finalRowCount} 集，目標 ${totalEpisodes} 集`);
+    }
+
+    res.json({ result: injectSourceText(finalCsv, novelText) });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// 3b. 聚合分段結果（SSE 流式版本，避免 Render 30s 超時）
+app.post('/api/novel/aggregate-stream', async (req, res) => {
+  const { chunks, targetEpisodes, title, novelText, chunkSize = 100000 } = req.body;
+
+  if (!chunks || !chunks.length) return res.status(400).json({ error: '缺少分段數據' });
+
+  // SSE 头 + cork/uncork safe writer for concurrent batch writes
+  req.socket?.setNoDelay?.(true);
+  res.socket?.setNoDelay?.(true);
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.flushHeaders();
+
+  let sseConnectionClosed = false;
+  res.on('close', () => { sseConnectionClosed = true; });
+  const send = (obj) => {
+    if (sseConnectionClosed) return;
+    try {
+      res.write(`data: ${JSON.stringify(obj)}\n\n`);
+    } catch { /* ignore write errors on closed connections */ }
+  };
+
+  const totalEpisodes = Math.max(1, Number(targetEpisodes) || 80);
+  const segments = buildSourceRanges(novelText || '', totalEpisodes);
+
+  console.log(`[📚 聚合-stream] 聚合 ${chunks.length} 段結果 → ${totalEpisodes} 集`);
+  send({ type: 'progress', message: `開始聚合 ${totalEpisodes} 集`, batch: 0, totalBatches: 0 });
+
+  try {
+    const BATCH_SIZE = 27;
+    const batchCount = Math.ceil(totalEpisodes / BATCH_SIZE);
+    const chunksStr = chunks.map((chunk, index) => `[段落${index + 1}]\n${chunk}`).join('\n\n');
+    const maxChunkTextPerBatch = 16000;
+
+    send({ type: 'progress', message: `分 ${batchCount} 批並行調用模型`, batch: 0, totalBatches: batchCount });
+
+    // 构造所有 batch promise，每批完成时推送进度
+    let completedBatches = 0;
+    const batchPromises = [];
+
+    for (let b = 0; b < batchCount; b++) {
+      const batchStart = b * BATCH_SIZE;
+      const batchEnd = Math.min(totalEpisodes, (b + 1) * BATCH_SIZE);
+      const batchEpStart = `E${String(batchStart + 1).padStart(3, '0')}`;
+      const batchEpEnd = `E${String(batchEnd).padStart(3, '0')}`;
+      const batchSegments = segments.slice(batchStart, batchEnd);
+      const batchSourceIndex = batchSegments.map((seg, i) => {
+        const epId = `E${String(batchStart + i + 1).padStart(3, '0')}`;
+        return `${epId},${seg.startLine}-${seg.endLine},${(seg.title || '').replace(/,/g, ' ')}`;
+      }).join('\n');
+
+      const batchSystemPrompt = `你是番劇策劃專家。根據分段分析結果，規劃第 ${batchEpStart}-${batchEpEnd} 集的大綱。
+
+## 思考過程
+先在 <thinking>...</thinking> 標籤內簡要分析（200字以內）：本批次覆蓋的原文段落核心內容、如何切分為合理的劇集單元。然後直接輸出 CSV。
+
+## 要求
+- 本批次輸出 ${batchEnd - batchStart} 集（${batchEpStart}-${batchEpEnd}）
+- source_range 只能使用我提供的 SOURCE RANGE INDEX 中的行號，禁止自行改寫
+- arc_block 按故事弧段劃分（如 A1、A2、B1、B2、C1 等）
+- 輸出必須是 CSV 純文本，不要 Markdown、不要 JSON、不要解釋
+
+## CSV表頭（必須一字不差）
+${BREAKDOWN_MODEL_HEADER}
+
+## CSV規則
+- 必須輸出 ${batchEnd - batchStart} 行（${batchEpStart}-${batchEpEnd}）
+- 每行 3 欄都要填滿，禁止空欄
+- source_range 必須逐行對應 SOURCE RANGE INDEX
+- arc_block 相鄰集數如屬同一故事弧段，使用相同標記
+- 語言跟隨原文語言`;
+
+      const batchUserMessage = `TITLE: ${title || '未命名'}
+
+SOURCE RANGE INDEX for ${batchEpStart}-${batchEpEnd} (ep_id,source_range,segment_title)
+${batchSourceIndex}
+
+CHUNK ANALYSES
+${chunksStr.substring(0, maxChunkTextPerBatch)}`;
+
+      console.log(`[📚 聚合-stream] 發起 batch ${b + 1}/${batchCount}: ${batchEpStart}-${batchEpEnd}`);
+      batchPromises.push(
+        (async () => {
+          try {
+            const result = await callClaudeWithStreaming(
+              batchSystemPrompt, batchUserMessage, 'aggregate',
+              { maxTokens: 8192 },
+              {
+                onThinking: (chunk) => send({ type: 'batch_thinking', batch: b + 1, content: chunk }),
+                onContent: (chunk) => send({ type: 'batch_content', batch: b + 1, content: chunk })
+              }
+            );
+            completedBatches++;
+            const csv = extractBreakdownCsv(result.text, batchEnd - batchStart);
+            if (csv) {
+              send({ type: 'batch_done', batch: b + 1, totalBatches: batchCount, episodes: batchEnd - batchStart, status: 'ok' });
+              return csv;
+            }
+            const payload = extractJsonPayload(result.text);
+            if (payload) {
+              const converted = buildAggregateCsvFromJson(payload, batchSegments, batchEnd - batchStart);
+              send({ type: 'batch_done', batch: b + 1, totalBatches: batchCount, episodes: batchEnd - batchStart, status: 'ok_converted' });
+              return converted;
+            }
+            send({ type: 'batch_done', batch: b + 1, totalBatches: batchCount, episodes: 0, status: 'parse_failed' });
+            return null;
+          } catch (streamErr) {
+            // Fallback to non-streaming callClaude on stream failure
+            console.warn(`[📚 聚合-stream] batch ${b + 1} 流式失敗，fallback 到非流式:`, streamErr.message);
+            try {
+              const fallbackResult = await callClaude(batchSystemPrompt, batchUserMessage, 'aggregate');
+              completedBatches++;
+              const csv = extractBreakdownCsv(fallbackResult.text, batchEnd - batchStart);
+              if (csv) {
+                send({ type: 'batch_done', batch: b + 1, totalBatches: batchCount, episodes: batchEnd - batchStart, status: 'ok_fallback' });
+                return csv;
+              }
+              send({ type: 'batch_done', batch: b + 1, totalBatches: batchCount, episodes: 0, status: 'parse_failed' });
+              return null;
+            } catch (fallbackErr) {
+              completedBatches++;
+              console.error(`[📚 聚合-stream] batch ${b + 1} fallback 也失敗:`, fallbackErr.message);
+              send({ type: 'batch_done', batch: b + 1, totalBatches: batchCount, episodes: 0, status: 'error', error: fallbackErr.message });
+              return null;
+            }
+          }
+        })()
+      );
+    }
+
+    // 心跳 keep-alive（每 15 秒）
+    const heartbeat = setInterval(() => {
+      send({ type: 'heartbeat', completed: completedBatches, total: batchCount });
+    }, 15000);
+
+    const batchResults = await Promise.all(batchPromises);
+    clearInterval(heartbeat);
+
+    // --- 合并批次 CSV ---
+    const mergedRows = [BREAKDOWN_CSV_HEADER];
+    const coveredEpisodes = new Set();
+
+    for (const batchCsv of batchResults) {
+      if (!batchCsv) continue;
+      const lines = batchCsv.split('\n');
+      for (const line of lines) {
+        if (line === BREAKDOWN_CSV_HEADER || line === BREAKDOWN_MODEL_HEADER) continue;
+        const epMatch = line.match(/^(E\d{3})/);
+        if (epMatch && !coveredEpisodes.has(epMatch[1])) {
+          coveredEpisodes.add(epMatch[1]);
+          mergedRows.push(line);
+        }
+      }
+    }
+
+    send({ type: 'progress', message: `模型產出 ${coveredEpisodes.size}/${totalEpisodes} 集`, batch: batchCount, totalBatches: batchCount });
+
+    // --- 补齐缺失集数 ---
+    if (coveredEpisodes.size < totalEpisodes) {
+      send({ type: 'progress', message: `補齊缺失的 ${totalEpisodes - coveredEpisodes.size} 集` });
+      const fallbackCsv = buildAggregateCsvFromChunkResults(chunks, segments, novelText || '', Number(chunkSize) || 100000);
+      if (fallbackCsv) {
+        const fallbackLines = fallbackCsv.split('\n');
+        for (const line of fallbackLines) {
+          if (line === BREAKDOWN_CSV_HEADER || line === BREAKDOWN_MODEL_HEADER) continue;
+          const epMatch = line.match(/^(E\d{3})/);
+          if (epMatch && !coveredEpisodes.has(epMatch[1])) {
+            coveredEpisodes.add(epMatch[1]);
+            mergedRows.push(line);
+          }
+        }
+      }
+    }
+
+    // --- 排序 ---
+    const header = mergedRows[0];
+    const dataRows = mergedRows.slice(1).sort((a, b) => {
+      const aId = a.match(/^E(\d{3})/);
+      const bId = b.match(/^E(\d{3})/);
+      return (aId ? parseInt(aId[1]) : 0) - (bId ? parseInt(bId[1]) : 0);
+    });
+
+    const finalCsv = [header, ...dataRows].join('\n');
+    console.log(`[📚 聚合-stream] 最終 CSV: ${dataRows.length}/${totalEpisodes} 集`);
+
+    send({ type: 'done', result: injectSourceText(finalCsv, novelText), episodes: dataRows.length, targetEpisodes: totalEpisodes });
+    res.end();
+  } catch (err) {
+    send({ type: 'error', error: err.message });
+    res.end();
   }
 });
 
@@ -2725,7 +4644,7 @@ app.get('/api/project/:projectId/storyboard', (req, res) => {
     
     if (format === 'csv') {
         res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename="${project.config.title}_storyboard.csv"`);
+        res.setHeader('Content-Disposition', `attachment; filename="storyboard.csv"; filename*=UTF-8''${encodeURIComponent(project.config.title)}_storyboard.csv`);
     }
     
     res.send(result);
@@ -3022,9 +4941,9 @@ try {
   console.warn('无法创建用户项目目录:', e.message);
 }
 
-// 获取用户项目 (需要登录；后端从JWT取userId，忽略URL参数)
-app.get('/api/user-projects/:userId', requireAuth, async (req, res) => {
-  const userId = req.user.id;
+// 获取用户项目（公开，userId 从 URL 参数取）
+app.get('/api/user-projects/:userId', async (req, res) => {
+  const userId = req.params.userId || '_public';
   
   // 優先從 Supabase 讀取
   if (isSupabaseEnabled()) {
@@ -3049,9 +4968,9 @@ app.get('/api/user-projects/:userId', requireAuth, async (req, res) => {
   }
 });
 
-// 保存用户项目 (需要登录；后端从JWT取userId，忽略URL参数)
-app.post('/api/user-projects/:userId', requireAuth, async (req, res) => {
-  const userId = req.user.id;
+// 保存用户项目（公开，userId 从 URL 参数取）
+app.post('/api/user-projects/:userId', async (req, res) => {
+  const userId = req.params.userId || '_public';
   const projects = req.body;
   const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
   
@@ -3072,10 +4991,10 @@ app.post('/api/user-projects/:userId', requireAuth, async (req, res) => {
   }
 });
 
-// 同步单个项目（增量更新，需要登录；后端从JWT取userId，忽略URL参数）
-app.put('/api/user-projects/:userId/:projectId', requireAuth, async (req, res) => {
+// 同步单个项目（增量更新，公开）
+app.put('/api/user-projects/:userId/:projectId', async (req, res) => {
   const { projectId } = req.params;
-  const userId = req.user.id;
+  const userId = req.params.userId || '_public';
   const projectData = req.body;
   const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
   
@@ -3103,10 +5022,112 @@ app.put('/api/user-projects/:userId/:projectId', requireAuth, async (req, res) =
 
 console.log(`💾 用户项目存储: ${useSupabase ? '☁️ Supabase + 本地' : '📁 本地存储'}`);
 
-app.listen(PORT, () => {
+// ========== 项目资产库 API（Asset Library） ==========
+
+import { readProjectContext, updateProjectData, writeProjectContext } from './pipeline/services/project-context.js';
+
+app.get('/', (req, res) => {
+  res.redirect('http://localhost:5173/');
+});
+
+/** 读取指定项目的 assetLibrary（从 user_projects 中提取） */
+function readProjectAssetLibrary(userId, projectId) {
+  const filePath = join(USER_PROJECTS_DIR, `${userId}.json`);
+  try {
+    if (!existsSync(filePath)) return null;
+    const projects = JSON.parse(readFileSync(filePath, 'utf-8'));
+    const project = projects[projectId];
+    return project?.data?.assetLibrary || project?.assetLibrary || null;
+  } catch { return null; }
+}
+
+/** 写入 assetLibrary 到项目 JSON（使用 context 层的底层存储） */
+async function writeProjectAssetLibrary(userId, projectId, assetLibrary) {
+  await updateProjectData(userId, projectId, async (project) => {
+    project.data.assetLibrary = assetLibrary;
+  });
+}
+
+// ── Project Context API（pipeline 全局状态） ──
+
+// PUT /api/projects/:projectId/context — 保存 pipeline context（merge patch）
+app.put('/api/projects/:projectId/context', async (req, res) => {
+  const { projectId } = req.params;
+  const userId = '_public';
+  const patch = req.body;
+
+  try {
+    await writeProjectContext(userId, projectId, patch);
+    console.log(`[Context] 保存 ${userId}/${projectId}, keys: ${Object.keys(patch).join(',')}`);
+    res.json({ status: 'ok' });
+  } catch (e) {
+    console.error(`[Context] 保存失败:`, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/projects/:projectId/context — 读取完整 context
+app.get('/api/projects/:projectId/context', (req, res) => {
+  const { projectId } = req.params;
+  const userId = '_public';
+  const ctx = readProjectContext(userId, projectId);
+  res.json(ctx || {});
+});
+
+// GET /api/projects/:projectId/context/:key — 读取 context 单个字段
+app.get('/api/projects/:projectId/context/:key', (req, res) => {
+  const { projectId, key } = req.params;
+  const userId = '_public';
+  const ctx = readProjectContext(userId, projectId);
+  res.json(ctx?.[key] ?? null);
+});
+
+// PUT /api/projects/:projectId/asset-library — 保存完整资产库（公开，无需认证）
+app.put('/api/projects/:projectId/asset-library', async (req, res) => {
+  const { projectId } = req.params;
+  const userId = '_public';
+  const assetLibrary = req.body;
+
+  try {
+    await writeProjectAssetLibrary(userId, projectId, assetLibrary);
+    console.log(`[AssetLibrary] 保存 ${userId}/${projectId}, keys: ${Object.keys(assetLibrary).join(',')}`);
+    res.json({ status: 'ok' });
+  } catch (e) {
+    console.error(`[AssetLibrary] 保存失败:`, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/projects/:projectId/asset-library — 读取项目资产库
+app.get('/api/projects/:projectId/asset-library', (req, res) => {
+  const { projectId } = req.params;
+  const userId = '_public';
+  const lib = readProjectAssetLibrary(userId, projectId);
+  res.json(lib || {});
+});
+
+// GET /api/projects/:projectId/characters — 只返回角色列表（供 @ 选择器用）
+app.get('/api/projects/:projectId/characters', (req, res) => {
+  const { projectId } = req.params;
+  const userId = '_public';
+  const lib = readProjectAssetLibrary(userId, projectId);
+  res.json(lib?.character_library || []);
+});
+
+// GET /api/projects/:projectId/costumes — 只返回服装列表
+app.get('/api/projects/:projectId/costumes', (req, res) => {
+  const { projectId } = req.params;
+  const userId = '_public';
+  const lib = readProjectAssetLibrary(userId, projectId);
+  res.json(lib?.costume_library || []);
+});
+
+app.listen(PORT, HOST, () => {
   const provider = PROVIDERS[currentProvider];
   console.log(`🎬 AI番劇 Agent Server v3 (Multi-Provider)`);
+  console.log(`   Host: ${HOST}`);
   console.log(`   Port: ${PORT}`);
   console.log(`   🤖 Provider: ${provider?.name || currentProvider}`);
+  console.log(`   🔑 API Key: ${getApiKeyForProvider(currentProvider) ? '✅ 已配置' : '❌ 未找到 — 请检查 .env 中的 ' + currentProvider.toUpperCase() + '_API_KEY'}`);
   console.log(`   📊 ${STATS.totalAgents} Agents | ${STATS.totalSkills} Skills`);
 });
